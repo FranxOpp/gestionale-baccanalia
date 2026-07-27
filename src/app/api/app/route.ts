@@ -156,11 +156,28 @@ export async function POST(req:NextRequest){
       return json({item});
     }
     if(b.action==="openEvening"){await requireUser(["ADMIN"]);await sql.begin(async tx=>{await tx`update work_evenings set active=false,closed_at=case when active then now() else closed_at end`;await tx`update work_evenings set active=true,opened_at=coalesce(opened_at,now()),closed_at=null where work_date=${b.workDate}`});return json({success:true})}
+    if(b.action==="deleteEvening"){
+      await requireUser(["ADMIN"]);
+      if(!b.eveningId)return json({error:"Serata non valida"},400);
+      const result=await sql.begin(async tx=>{
+        const [evening]=await tx`select id from work_evenings where id=${b.eveningId} for update`;
+        if(!evening)return null;
+        const [{count}]=await tx`select count(*)::int count from orders where work_evening_id=${evening.id}`;
+        await tx`update restaurant_tables set status='LIBERO',assigned_waiter_id=null where id in(select table_id from orders where work_evening_id=${evening.id} and status='APERTO' and table_id is not null)`;
+        await tx`delete from order_events where order_id in(select id from orders where work_evening_id=${evening.id})`;
+        await tx`delete from order_items where order_id in(select id from orders where work_evening_id=${evening.id})`;
+        await tx`delete from orders where work_evening_id=${evening.id}`;
+        await tx`delete from work_evenings where id=${evening.id}`;
+        return{deletedOrders:count};
+      });
+      if(!result)return json({error:"Serata non trovata"},404);
+      return json(result);
+    }
     if(b.action==="saveSettings"){
       await requireUser(["ADMIN"]);
       const festivalName=String(b.festivalName||"").trim(),cellarName=String(b.cellarName||"").trim();
       if(!festivalName||!cellarName||!b.startDate||!b.endDate||b.endDate<b.startDate)return json({error:"Compila correttamente i dati della manifestazione"},400);
-      await sql.begin(async tx=>{const updated=await tx`update app_settings set festival_name=${festivalName},cellar_name=${cellarName},start_date=${b.startDate},end_date=${b.endDate},updated_at=now() returning id`;if(!updated.length)await tx`insert into app_settings(festival_name,cellar_name,start_date,end_date) values(${festivalName},${cellarName},${b.startDate},${b.endDate})`;await tx`insert into work_evenings(work_date) select d::date from generate_series(${b.startDate}::date,${b.endDate}::date,'1 day') d on conflict(work_date) do nothing`;await tx`insert into menu_categories(name,display_order) select name,position from unnest(array['Primi','Secondi','Panini','Contorni','Bevande','Altro']) with ordinality as c(name,position) where not exists(select 1 from menu_categories)`});return json({success:true});
+      await sql.begin(async tx=>{const [previous]=await tx`select start_date::text,end_date::text from app_settings limit 1`;const updated=await tx`update app_settings set festival_name=${festivalName},cellar_name=${cellarName},start_date=${b.startDate},end_date=${b.endDate},updated_at=now() returning id`;if(!updated.length)await tx`insert into app_settings(festival_name,cellar_name,start_date,end_date) values(${festivalName},${cellarName},${b.startDate},${b.endDate})`;if(!previous||previous.start_date!==b.startDate||previous.end_date!==b.endDate)await tx`insert into work_evenings(work_date) select d::date from generate_series(${b.startDate}::date,${b.endDate}::date,'1 day') d on conflict(work_date) do nothing`;await tx`insert into menu_categories(name,display_order) select name,position from unnest(array['Primi','Secondi','Panini','Contorni','Bevande','Altro']) with ordinality as c(name,position) where not exists(select 1 from menu_categories)`});return json({success:true});
     }
     if(b.action==="openTable"){
       await requireUser(["CAMERIERE"]);const [evening]=await sql`select id from work_evenings where active=true`;if(!evening)return json({error:"Nessuna serata attiva"},409);
