@@ -14,6 +14,7 @@ const failure=(e:unknown)=>{
 export async function GET(req:NextRequest){
   const action=req.nextUrl.searchParams.get("action");
   try{
+    if(action==="setupStatus"){const [{available}]=await sql`select not exists(select 1 from users where role='ADMIN') available`;return json({available})}
     if(action==="me"){const session=await currentUser();if(session)await createSession(session);return json({user:session})}
     const user=await requireUser();
     if(action==="state"){
@@ -67,7 +68,7 @@ export async function POST(req:NextRequest){
   const b=await req.json();
   try{
     if(b.action==="setup"){
-      const [{count}]=await sql`select count(*)::int count from users`;
+      const [{count}]=await sql`select count(*)::int count from users where role='ADMIN'`;
       if(count>0)return json({error:"Configurazione già effettuata"},409);
       if(!b.username||!b.password||b.password.length<8)return json({error:"Password minima: 8 caratteri"},400);
       const hash=await bcrypt.hash(b.password,12);
