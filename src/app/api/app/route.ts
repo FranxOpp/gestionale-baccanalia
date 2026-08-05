@@ -8,6 +8,7 @@ const failure=(e:unknown)=>{
   if(message==="UNAUTHORIZED")return json({error:"Sessione scaduta o non autorizzata"},401);
   if(message==="BUSY")return json({error:"Tavolo già occupato"},409);
   if(message==="CLOSED")return json({error:"Ordine già chiuso"},409);
+  if(message==="ITEM_NOT_FOUND")return json({error:"Prodotto non trovato"},404);
   return json({error:"Operazione non riuscita"},500);
 };
 
@@ -180,25 +181,37 @@ export async function POST(req:NextRequest){
       await sql.begin(async tx=>{const [previous]=await tx`select start_date::text,end_date::text from app_settings limit 1`;const updated=await tx`update app_settings set festival_name=${festivalName},cellar_name=${cellarName},start_date=${b.startDate},end_date=${b.endDate},updated_at=now() returning id`;if(!updated.length)await tx`insert into app_settings(festival_name,cellar_name,start_date,end_date) values(${festivalName},${cellarName},${b.startDate},${b.endDate})`;if(!previous||previous.start_date!==b.startDate||previous.end_date!==b.endDate)await tx`insert into work_evenings(work_date) select d::date from generate_series(${b.startDate}::date,${b.endDate}::date,'1 day') d on conflict(work_date) do nothing`;await tx`insert into menu_categories(name,display_order) select name,position from unnest(array['Primi','Secondi','Panini','Contorni','Bevande','Altro']) with ordinality as c(name,position) where not exists(select 1 from menu_categories)`});return json({success:true});
     }
     if(b.action==="openTable"){
-      await requireUser(["CAMERIERE"]);const [evening]=await sql`select id from work_evenings where active=true`;if(!evening)return json({error:"Nessuna serata attiva"},409);
+      await requireUser(["CAMERIERE","CASSIERE"]);const [evening]=await sql`select id from work_evenings where active=true`;if(!evening)return json({error:"Nessuna serata attiva"},409);
       const accountName=String(b.accountName||"").trim();if(!accountName)return json({error:"Inserisci il nome del conto"},400);
-      const order=await sql.begin(async tx=>{const [t]=await tx`select * from restaurant_tables where id=${b.tableId} for update`;if(!t||t.status!=="LIBERO")throw new Error("BUSY");await tx`update restaurant_tables set status='OCCUPATO',assigned_waiter_id=${user.id} where id=${b.tableId}`;const [o]=await tx`insert into orders(table_id,work_evening_id,account_name,waiter_id) values(${b.tableId},${evening.id},${accountName},${user.id}) returning *`;return o});return json({order},201);
+      const guestCount=Math.trunc(Number(b.guestCount));if(!Number.isInteger(guestCount)||guestCount<1||guestCount>100)return json({error:"Inserisci un numero di coperti valido"},400);
+      const order=await sql.begin(async tx=>{const [t]=await tx`select * from restaurant_tables where id=${b.tableId} for update`;if(!t||t.status!=="LIBERO")throw new Error("BUSY");await tx`update restaurant_tables set status='OCCUPATO',assigned_waiter_id=${user.id} where id=${b.tableId}`;const [o]=await tx`insert into orders(table_id,work_evening_id,account_name,waiter_id,guest_count) values(${b.tableId},${evening.id},${accountName},${user.id},${guestCount}) returning *`;return o});return json({order},201);
     }
     if(b.action==="openCounterOrder"){
       await requireUser(["CASSIERE"]);
       const accountName=String(b.accountName||"").trim();
       if(!accountName)return json({error:"Inserisci il nome del conto"},400);
+      const guestCount=Math.trunc(Number(b.guestCount));
+      if(!Number.isInteger(guestCount)||guestCount<1||guestCount>100)return json({error:"Inserisci un numero di coperti valido"},400);
       const [evening]=await sql`select id from work_evenings where active=true`;
       if(!evening)return json({error:"Nessuna serata attiva"},409);
-      const [order]=await sql`insert into orders(table_id,work_evening_id,account_name,waiter_id) values(null,${evening.id},${accountName},${user.id}) returning *`;
+      const [order]=await sql`insert into orders(table_id,work_evening_id,account_name,waiter_id,guest_count) values(null,${evening.id},${accountName},${user.id},${guestCount}) returning *`;
       return json({order},201);
     }
     if(b.action==="setItem"){
-      const [o]=await sql`select * from orders where id=${b.orderId} and status='APERTO'`;if(!o||(user.role==="CAMERIERE"&&o.waiter_id!==user.id))return json({error:"Ordine non modificabile"},403);
-      const [m]=await sql`select * from menu_items where id=${b.menuItemId} and active=true`;if(!m)return json({error:"Prodotto non trovato"},404);
-      if(b.quantity<=0)await sql`delete from order_items where order_id=${b.orderId} and menu_item_id=${b.menuItemId}`;
-      else await sql`insert into order_items(order_id,menu_item_id,item_name,unit_price,quantity) values(${b.orderId},${m.id},${m.name},${m.price},${b.quantity}) on conflict(order_id,menu_item_id) do update set quantity=excluded.quantity,updated_at=now()`;
-      await sql`update orders set total=coalesce((select sum(subtotal) from order_items where order_id=${b.orderId}),0) where id=${b.orderId}`;return json({success:true});
+      const quantity=Math.max(0,Math.trunc(Number(b.quantity)));
+      if(!Number.isFinite(quantity))return json({error:"Quantità non valida"},400);
+      const result=await sql.begin(async tx=>{
+        const [o]=await tx`select * from orders where id=${b.orderId} and status='APERTO' for update`;
+        if(!o||(user.role==="CAMERIERE"&&o.waiter_id!==user.id))return null;
+        const [m]=await tx`select * from menu_items where id=${b.menuItemId} and active=true`;
+        if(!m)throw new Error("ITEM_NOT_FOUND");
+        if(quantity===0)await tx`delete from order_items where order_id=${o.id} and menu_item_id=${m.id}`;
+        else await tx`insert into order_items(order_id,menu_item_id,item_name,unit_price,quantity) values(${o.id},${m.id},${m.name},${m.price},${quantity}) on conflict(order_id,menu_item_id) do update set quantity=excluded.quantity,updated_at=now()`;
+        const [updated]=await tx`update orders set total=coalesce((select sum(subtotal) from order_items where order_id=${o.id}),0),updated_at=now() where id=${o.id} returning total`;
+        return updated;
+      });
+      if(!result)return json({error:"Ordine non modificabile"},403);
+      return json({success:true,total:result.total});
     }
     if(b.action==="clearOrder"){
       const [o]=await sql`select * from orders where id=${b.orderId} and status='APERTO'`;

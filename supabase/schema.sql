@@ -10,3 +10,7 @@ create index if not exists orders_status_idx on orders(status);
 create index if not exists order_events_order_idx on order_events(order_id);
 -- Gli ordini diretti creati dal cassiere non sono associati a un tavolo.
 alter table orders alter column table_id drop not null;
+-- Numero di persone associate all'ordine, usato anche per il calcolo a testa.
+alter table orders add column if not exists guest_count integer not null default 1;
+alter table orders drop constraint if exists orders_guest_count_check;
+alter table orders add constraint orders_guest_count_check check (guest_count between 1 and 100);
