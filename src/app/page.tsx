@@ -1,95 +1,2081 @@
 "use client";
-import {FormEvent,useEffect,useRef,useState} from "react";
-import {ChartNoAxesCombined,ChevronDown,LayoutGrid,LogOut,ReceiptText,Settings as SettingsIcon,UtensilsCrossed,UsersRound,Wifi} from "lucide-react";
+import { FormEvent, useEffect, useRef, useState } from "react";
+import {
+  ChartNoAxesCombined,
+  ChevronDown,
+  Download,
+  LayoutGrid,
+  LogOut,
+  ReceiptText,
+  Settings as SettingsIcon,
+  UtensilsCrossed,
+  UsersRound,
+  Wifi,
+} from "lucide-react";
 
-type User={id:string;displayName:string;username:string;role:"ADMIN"|"CAMERIERE"|"CASSIERE"};
-type Table={id:string;table_number:number|string;status:string;assigned_waiter_id?:string;waiter_name?:string;order_id?:number;account_name?:string;total?:number;guest_count?:number};
-type MenuCategory={id:string;name:string;display_order:number;active:boolean};
-type MenuItem={id:string;category_id:string;category:string;name:string;price:number|string;display_order:number;active:boolean};
-type AppState={settings?:{festival_name:string;cellar_name:string;start_date:string;end_date:string};tables:Table[];menuCategories:MenuCategory[];menu:MenuItem[];workEvenings:{id:string;work_date:string;active:boolean}[];directOrders:{order_id:number;account_name:string;total:number;waiter_name:string}[]};
-type ClosedOrder={id:number;table_number:number|null;account_name:string;order_code:string;closed_at:string;waiter_name:string;total:number|string};
-type StaffUser={id:string;display_name:string;username:string;role:string;active:boolean};
-const api=async(method:string,body?:unknown,action?:string)=>{const r=await fetch(`/api/app${action?`?action=${action}`:""}`,{method,headers:{"content-type":"application/json"},body:body?JSON.stringify(body):undefined,credentials:"same-origin"});const d=await r.json();if(r.status===401)window.dispatchEvent(new Event("session-expired"));if(!r.ok)throw new Error(d.error);return d};
-const money=(v:number|string=0)=>new Intl.NumberFormat("it-IT",{style:"currency",currency:"EUR"}).format(+v);
-const NavIcon=({name}:{name:string})=>name==="tavoli"?<LayoutGrid/>:name==="menu"?<UtensilsCrossed/>:name==="ordini"?<ReceiptText/>:name==="statistiche"?<ChartNoAxesCombined/>:name==="utenti"?<UsersRound/>:<SettingsIcon/>;
+type User = {
+  id: string;
+  displayName: string;
+  username: string;
+  role: "ADMIN" | "CAMERIERE" | "CASSIERE";
+};
+type Table = {
+  id: string;
+  table_number: number | string;
+  status: string;
+  assigned_waiter_id?: string;
+  waiter_name?: string;
+  order_id?: number;
+  account_name?: string;
+  total?: number;
+  guest_count?: number;
+};
+type MenuCategory = {
+  id: string;
+  name: string;
+  display_order: number;
+  active: boolean;
+};
+type MenuItem = {
+  id: string;
+  category_id: string;
+  category: string;
+  name: string;
+  price: number | string;
+  display_order: number;
+  active: boolean;
+};
+type AppState = {
+  settings?: {
+    festival_name: string;
+    cellar_name: string;
+    start_date: string;
+    end_date: string;
+  };
+  tables: Table[];
+  menuCategories: MenuCategory[];
+  menu: MenuItem[];
+  workEvenings: { id: string; work_date: string; active: boolean }[];
+  directOrders: {
+    order_id: number;
+    account_name: string;
+    total: number;
+    waiter_name: string;
+  }[];
+};
+type ClosedOrder = {
+  id: number;
+  table_number: number | null;
+  account_name: string;
+  order_code: string;
+  closed_at: string;
+  waiter_name: string;
+  total: number | string;
+};
+type StaffUser = {
+  id: string;
+  display_name: string;
+  username: string;
+  role: string;
+  active: boolean;
+};
+const api = async (method: string, body?: unknown, action?: string) => {
+  const r = await fetch(`/api/app${action ? `?action=${action}` : ""}`, {
+    method,
+    headers: { "content-type": "application/json" },
+    body: body ? JSON.stringify(body) : undefined,
+    credentials: "same-origin",
+  });
+  const d = await r.json();
+  if (r.status === 401) window.dispatchEvent(new Event("session-expired"));
+  if (!r.ok) throw new Error(d.error);
+  return d;
+};
+const money = (v: number | string = 0) =>
+  new Intl.NumberFormat("it-IT", { style: "currency", currency: "EUR" }).format(
+    +v,
+  );
+const NavIcon = ({ name }: { name: string }) =>
+  name === "tavoli" ? (
+    <LayoutGrid />
+  ) : name === "menu" ? (
+    <UtensilsCrossed />
+  ) : name === "ordini" ? (
+    <ReceiptText />
+  ) : name === "statistiche" ? (
+    <ChartNoAxesCombined />
+  ) : name === "utenti" ? (
+    <UsersRound />
+  ) : (
+    <SettingsIcon />
+  );
 
-export default function Home(){
-  const [user,setUser]=useState<User|null|undefined>(undefined),[state,setState]=useState<AppState|null>(null),[view,setView]=useState("tavoli"),[error,setError]=useState(""),[accountOpen,setAccountOpen]=useState(false);
-  const load=async()=>{const m=await api("GET",undefined,"me");setUser(m.user);if(m.user)setState(await api("GET",undefined,"state"))};
-  useEffect(()=>{api("GET",undefined,"me").then(async m=>{setUser(m.user);if(m.user)setState(await api("GET",undefined,"state"))}).catch(()=>setUser(null))},[]);
-  useEffect(()=>{const expired=()=>{setState(null);setUser(null)};window.addEventListener("session-expired",expired);return()=>window.removeEventListener("session-expired",expired)},[]);
-  if(user===undefined)return <main className="center"><div className="loader"/></main>;
-  if(!user)return <Access onDone={load}/>;
-  const nav=user.role==="ADMIN"?["tavoli","menu","ordini","statistiche","utenti","impostazioni"]:user.role==="CASSIERE"?["tavoli","menu","ordini"]:["tavoli","menu"];
-  async function logout(){try{await api("POST",{action:"logout"})}finally{setAccountOpen(false);setState(null);setUser(null)}}
-  return <main className="shell"><aside><div className="brand"><span>B</span><div><b>Baccanalia</b><small>Gestionale ristorazione</small></div></div><nav>{nav.map(n=><button className={view===n?"active":""} onClick={()=>setView(n)} key={n}><NavIcon name={n}/><span>{n}</span></button>)}</nav><div className="profile"><b>{user.displayName}</b><small>{user.role}</small></div></aside><section className="content"><header><div><p>19–23 AGOSTO 2026</p><h1>{view[0].toUpperCase()+view.slice(1)}</h1></div><div className="header-actions"><span className="live"><Wifi/> Sistema collegato</span><div className="account-menu"><button className="account-trigger" aria-expanded={accountOpen} onClick={()=>setAccountOpen(!accountOpen)}><span>{user.displayName.slice(0,1).toUpperCase()}</span><div><b>{user.displayName}</b><small>{user.role}</small></div><ChevronDown/></button>{accountOpen&&<div className="account-dropdown"><button onClick={logout}><LogOut/> Esci</button></div>}</div></div></header>{error&&<div className="alert">{error}</div>}{view==="tavoli"&&<Tables user={user} data={state} reload={load} fail={setError}/>} {view==="menu"&&<Menu user={user} data={state} reload={load} fail={setError}/>} {view==="ordini"&&<Orders/>}{view==="statistiche"&&<Statistics/>}{view==="utenti"&&<Users reload={load}/>} {view==="impostazioni"&&<Settings reload={load}/>}</section></main>
-}
-
-function Access({onDone}:{onDone:()=>void}){
-  const [setup,setSetup]=useState(false),[setupAvailable,setSetupAvailable]=useState(false),[form,setForm]=useState({displayName:"Francesco",username:"",password:""}),[error,setError]=useState("");
-  useEffect(()=>{api("GET",undefined,"setupStatus").then(d=>setSetupAvailable(Boolean(d.available))).catch(()=>setSetupAvailable(false))},[]);
-  async function submit(e:FormEvent){e.preventDefault();try{await api("POST",{action:setup?"setup":"login",...form});onDone()}catch(x){setError((x as Error).message)}}
-  return <main className="access"><section><div className="login-brand"><div className="logo">B</div><span>Area riservata</span></div><p className="overline">GESTIONALE SAGRA</p><h1>{setup?"Crea il primo amministratore":"Bentornato"}</h1><p>{setup?"Configura l’account che gestirà personale, menu e serate.":"Accedi per gestire il servizio Baccanalia."}</p><form onSubmit={submit}>{setup&&<label>Nome visualizzato<input value={form.displayName} onChange={e=>setForm({...form,displayName:e.target.value})}/></label>}<label>Nome utente<input autoComplete="username" required value={form.username} onChange={e=>setForm({...form,username:e.target.value})}/></label><label>Password<input autoComplete={setup?"new-password":"current-password"} required minLength={8} type="password" value={form.password} onChange={e=>setForm({...form,password:e.target.value})}/></label>{error&&<div className="form-error">{error}</div>}<button type="submit">{setup?"Crea admin":"Accedi"}</button></form>{setup?<button className="link" onClick={()=>{setSetup(false);setError("")}}>Torna al login</button>:setupAvailable&&<button className="link" onClick={()=>{setSetup(true);setError("")}}>Prima configurazione</button>}</section></main>
-}
-
-function Tables({user,data,reload,fail}:{user:User;data:AppState|null;reload:()=>void;fail:(x:string)=>void}){
-  const [chosen,setChosen]=useState<Table|null>(null),[orderTable,setOrderTable]=useState<Table|null>(null),[name,setName]=useState(""),[guestCount,setGuestCount]=useState("1"),[counterOpen,setCounterOpen]=useState(false),[counterName,setCounterName]=useState(""),[counterGuests,setCounterGuests]=useState("1"),[editing,setEditing]=useState<Table|null>(null),[manageOpen,setManageOpen]=useState(false),[deleting,setDeleting]=useState<Table|null>(null),[tableNumber,setTableNumber]=useState(""),[saving,setSaving]=useState(false);
-  const tables:Table[]=data?.tables||[];
-  const sortedTables=[...tables].sort((a,b)=>user.role==="CAMERIERE"?Number(b.assigned_waiter_id===user.id)-Number(a.assigned_waiter_id===user.id)||Number(a.table_number)-Number(b.table_number):Number(a.table_number)-Number(b.table_number));
-  async function open(){if(!chosen)return;try{setSaving(true);fail("");const result=await api("POST",{action:"openTable",tableId:chosen.id,accountName:name,guestCount:Number(guestCount)});setOrderTable({...chosen,status:"OCCUPATO",order_id:result.order.id,account_name:name,assigned_waiter_id:user.id,waiter_name:user.displayName,total:0,guest_count:Number(guestCount)});setChosen(null);setName("");setGuestCount("1");await reload()}catch(e){fail((e as Error).message)}finally{setSaving(false)}}
-  function showTableForm(table?:Table){setEditing(table||null);setTableNumber(table?String(table.table_number):"");setManageOpen(true)}
-  async function saveTable(e:FormEvent){e.preventDefault();try{setSaving(true);fail("");await api("POST",{action:editing?"updateTable":"addTable",tableId:editing?.id,tableNumber:Number(tableNumber)});setManageOpen(false);setEditing(null);setTableNumber("");await reload()}catch(e){fail((e as Error).message)}finally{setSaving(false)}}
-  async function deleteTable(){if(!deleting)return;try{setSaving(true);fail("");await api("POST",{action:"deleteTable",tableId:deleting.id});setDeleting(null);await reload()}catch(e){fail((e as Error).message)}finally{setSaving(false)}}
-  async function openCounterOrder(e:FormEvent){e.preventDefault();try{setSaving(true);fail("");const result=await api("POST",{action:"openCounterOrder",accountName:counterName,guestCount:Number(counterGuests)});setCounterOpen(false);setOrderTable({id:`direct-${result.order.id}`,table_number:"Cassa",status:"OCCUPATO",order_id:result.order.id,account_name:counterName,assigned_waiter_id:user.id,waiter_name:user.displayName,total:0,guest_count:Number(counterGuests)});setCounterName("");setCounterGuests("1");await reload()}catch(e){fail((e as Error).message)}finally{setSaving(false)}}
-  if(orderTable)return <OrderEditor table={orderTable} user={user} menu={data?.menu.filter(i=>i.active)||[]} close={()=>setOrderTable(null)} reload={reload} fail={fail}/>;
-  return <><div className="tables-toolbar"><div className="legend"><span>● Disponibile</span><span>● Occupato</span><b>{tables.filter(t=>t.status==="LIBERO").length}/{tables.length} liberi</b></div>{user.role==="CASSIERE"&&<button className="add-table" onClick={()=>setCounterOpen(true)}>＋ Ordine diretto</button>}{user.role==="ADMIN"&&<button className="add-table" onClick={()=>showTableForm()}>＋ Aggiungi tavolo</button>}</div>{Boolean(data?.directOrders.length)&&<section className="direct-orders"><div><small>ORDINI SENZA TAVOLO</small><h2>Ordini diretti da cassa</h2></div><div>{data?.directOrders.map(o=><button key={o.order_id} onClick={()=>setOrderTable({id:`direct-${o.order_id}`,table_number:"Cassa",status:"OCCUPATO",order_id:o.order_id,account_name:o.account_name,waiter_name:o.waiter_name,total:o.total})}><span>Ordine diretto</span><b>{o.account_name}</b><strong>{money(o.total)}</strong></button>)}</div></section>}<div className="tables">{sortedTables.map(t=>{const own=t.assigned_waiter_id===user.id,canCreate=t.status==="LIBERO"&&(user.role==="CAMERIERE"||user.role==="CASSIERE"),canOpen=t.status==="OCCUPATO"&&(user.role!=="CAMERIERE"||own);return <article key={t.id} className={`table-card ${t.status.toLowerCase()} ${own?"own-table":""} ${canCreate||canOpen?"clickable":""}`} onClick={()=>canCreate?setChosen(t):canOpen&&setOrderTable(t)}>{own&&<mark>IL MIO TAVOLO</mark>}<small>TAVOLO</small><strong>{String(t.table_number).padStart(2,"0")}</strong>{t.status==="LIBERO"?<><b>Disponibile</b><span>{canCreate?"Tocca per aprire":"Pronto per il servizio"}</span></>:<><b>{t.account_name}</b><span>{t.waiter_name} · {money(t.total)}</span><em>{canOpen?"Apri la comanda":"Assegnato a un altro cameriere"}</em></>}{user.role==="ADMIN"&&<div className="table-actions"><button disabled={t.status!=="LIBERO"} onClick={e=>{e.stopPropagation();showTableForm(t)}}>Modifica</button><button className="danger" disabled={t.status!=="LIBERO"} onClick={e=>{e.stopPropagation();setDeleting(t)}}>Elimina</button></div>}</article>})}</div>{!tables.length&&<div className="empty">{user.role==="ADMIN"?"Non ci sono ancora tavoli. Usa “Aggiungi tavolo” per iniziare.":"L’admin deve ancora inserire i tavoli."}</div>}{counterOpen&&<div className="modal-bg"><form className="modal" onSubmit={openCounterOrder}><small>NUOVO ORDINE DIRETTO</small><h2>Ordine da cassa</h2><p>Questo ordine non sarà associato ad alcun tavolo.</p><label>Nome del conto<input autoFocus required value={counterName} onChange={e=>setCounterName(e.target.value)} placeholder="Es. Mario Rossi"/></label><label>Numero di coperti<input required type="number" inputMode="numeric" min="1" max="100" step="1" value={counterGuests} onChange={e=>setCounterGuests(e.target.value)}/></label><div><button type="button" className="secondary" onClick={()=>setCounterOpen(false)}>Annulla</button><button disabled={saving||!counterName.trim()||Number(counterGuests)<1}>{saving?"Apertura…":"Apri ordine"}</button></div></form></div>}{chosen&&<div className="modal-bg"><div className="modal"><small>APERTURA CONTO</small><h2>Tavolo {chosen.table_number}</h2><label>Nome del conto<input autoFocus value={name} onChange={e=>setName(e.target.value)} placeholder="Es. Famiglia Rossi"/></label><label>Numero di coperti<input required type="number" inputMode="numeric" min="1" max="100" step="1" value={guestCount} onChange={e=>setGuestCount(e.target.value)}/></label><div><button className="secondary" disabled={saving} onClick={()=>setChosen(null)}>Annulla</button><button disabled={saving||!name.trim()||Number(guestCount)<1} onClick={open}>{saving?"Apertura…":"Apri conto"}</button></div></div></div>}{manageOpen&&<div className="modal-bg"><form className="modal" onSubmit={saveTable}><small>{editing?"MODIFICA TAVOLO":"NUOVO TAVOLO"}</small><h2>{editing?`Tavolo ${editing.table_number}`:"Aggiungi tavolo"}</h2><label>Numero tavolo<input autoFocus required type="number" inputMode="numeric" min="1" step="1" value={tableNumber} onChange={e=>setTableNumber(e.target.value)} placeholder="Es. 12"/></label><div><button type="button" className="secondary" onClick={()=>setManageOpen(false)}>Annulla</button><button disabled={saving||!tableNumber}>{saving?"Salvataggio…":editing?"Salva modifica":"Aggiungi"}</button></div></form></div>}{deleting&&<div className="modal-bg"><div className="modal confirm-modal"><small>ELIMINA TAVOLO</small><h2>Eliminare il tavolo {deleting.table_number}?</h2><p>Non sarà più visibile nella sala. Gli ordini passati resteranno nello storico.</p><div><button className="secondary" onClick={()=>setDeleting(null)}>Annulla</button><button className="danger-button" disabled={saving} onClick={deleteTable}>{saving?"Eliminazione…":"Elimina tavolo"}</button></div></div></div>}</>
-}
-function OrderEditor({table,user,menu,close,reload,fail}:{table:Table;user:User;menu:MenuItem[];close:()=>void;reload:()=>void;fail:(x:string)=>void}){
-  type Detail={order:{id:number;account_name:string;waiter_name:string;total:number|string;guest_count:number};items:{menu_item_id:string;quantity:number}[]};
-  const [detail,setDetail]=useState<Detail|null>(null),[busy,setBusy]=useState(false),[saving,setSaving]=useState(false);
-  const pending=useRef(new Map<string,number>()),timers=useRef(new Map<string,ReturnType<typeof setTimeout>>()),sending=useRef(new Map<string,Promise<void>>());
-  const loadDetail=()=>api("GET",undefined,`order&id=${table.order_id}`).then(setDetail).catch(e=>{fail((e as Error).message);close()});
-  useEffect(()=>{api("GET",undefined,`order&id=${table.order_id}`).then(setDetail).catch(e=>{fail((e as Error).message);close()})},[table.order_id,fail,close]);
-  async function saveItem(menuItemId:string){
-    const active=sending.current.get(menuItemId);if(active)return active;
-    const task=(async()=>{try{while(pending.current.has(menuItemId)){const value=pending.current.get(menuItemId)!;pending.current.delete(menuItemId);await api("POST",{action:"setItem",orderId:table.order_id,menuItemId,quantity:value})}}catch(e){pending.current.delete(menuItemId);fail((e as Error).message);await loadDetail();throw e}finally{sending.current.delete(menuItemId);if(!pending.current.size&&!sending.current.size)setSaving(false)}})();
-    sending.current.set(menuItemId,task);return task;
+export default function Home() {
+  const [user, setUser] = useState<User | null | undefined>(undefined),
+    [state, setState] = useState<AppState | null>(null),
+    [view, setView] = useState("tavoli"),
+    [error, setError] = useState(""),
+    [accountOpen, setAccountOpen] = useState(false);
+  const load = async () => {
+    const m = await api("GET", undefined, "me");
+    setUser(m.user);
+    if (m.user) setState(await api("GET", undefined, "state"));
+  };
+  useEffect(() => {
+    api("GET", undefined, "me")
+      .then(async (m) => {
+        setUser(m.user);
+        if (m.user) setState(await api("GET", undefined, "state"));
+      })
+      .catch(() => setUser(null));
+  }, []);
+  useEffect(() => {
+    const expired = () => {
+      setState(null);
+      setUser(null);
+    };
+    window.addEventListener("session-expired", expired);
+    return () => window.removeEventListener("session-expired", expired);
+  }, []);
+  if (user === undefined)
+    return (
+      <main className="center">
+        <div className="loader" />
+      </main>
+    );
+  if (!user) return <Access onDone={load} />;
+  const nav =
+    user.role === "ADMIN"
+      ? ["tavoli", "menu", "ordini", "statistiche", "utenti", "impostazioni"]
+      : user.role === "CASSIERE"
+        ? ["tavoli", "menu", "ordini"]
+        : ["tavoli", "menu"];
+  async function logout() {
+    try {
+      await api("POST", { action: "logout" });
+    } finally {
+      setAccountOpen(false);
+      setState(null);
+      setUser(null);
+    }
   }
-  function quantity(menuItemId:string,value:number){
-    const next=Math.max(0,value),product=menu.find(m=>m.id===menuItemId);if(!product)return;
-    setDetail(current=>{if(!current)return current;const previous=current.items.find(i=>i.menu_item_id===menuItemId)?.quantity||0;const items=next===0?current.items.filter(i=>i.menu_item_id!==menuItemId):current.items.some(i=>i.menu_item_id===menuItemId)?current.items.map(i=>i.menu_item_id===menuItemId?{...i,quantity:next}:i):[...current.items,{menu_item_id:menuItemId,quantity:next}];return{...current,order:{...current.order,total:Number(current.order.total)+(next-previous)*Number(product.price)},items}});
-    pending.current.set(menuItemId,next);setSaving(true);const oldTimer=timers.current.get(menuItemId);if(oldTimer)clearTimeout(oldTimer);timers.current.set(menuItemId,setTimeout(()=>{timers.current.delete(menuItemId);void saveItem(menuItemId).catch(()=>{})},350));
+  return (
+    <main className="shell">
+      <aside>
+        <div className="brand">
+          <span>B</span>
+          <div>
+            <b>Baccanalia</b>
+            <small>Gestionale ristorazione</small>
+          </div>
+        </div>
+        <nav>
+          {nav.map((n) => (
+            <button
+              className={view === n ? "active" : ""}
+              onClick={() => setView(n)}
+              key={n}
+            >
+              <NavIcon name={n} />
+              <span>{n}</span>
+            </button>
+          ))}
+        </nav>
+        <div className="profile">
+          <b>{user.displayName}</b>
+          <small>{user.role}</small>
+        </div>
+      </aside>
+      <section className="content">
+        <header>
+          <div>
+            <p>19–23 AGOSTO 2026</p>
+            <h1>{view[0].toUpperCase() + view.slice(1)}</h1>
+          </div>
+          <div className="header-actions">
+            <span className="live">
+              <Wifi /> Sistema collegato
+            </span>
+            <div className="account-menu">
+              <button
+                className="account-trigger"
+                aria-expanded={accountOpen}
+                onClick={() => setAccountOpen(!accountOpen)}
+              >
+                <span>{user.displayName.slice(0, 1).toUpperCase()}</span>
+                <div>
+                  <b>{user.displayName}</b>
+                  <small>{user.role}</small>
+                </div>
+                <ChevronDown />
+              </button>
+              {accountOpen && (
+                <div className="account-dropdown">
+                  <button onClick={logout}>
+                    <LogOut /> Esci
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </header>
+        {error && <div className="alert">{error}</div>}
+        {view === "tavoli" && (
+          <Tables user={user} data={state} reload={load} fail={setError} />
+        )}{" "}
+        {view === "menu" && (
+          <Menu user={user} data={state} reload={load} fail={setError} />
+        )}{" "}
+        {view === "ordini" && <Orders />}
+        {view === "statistiche" && <Statistics />}
+        {view === "utenti" && <Users reload={load} />}{" "}
+        {view === "impostazioni" && <Settings reload={load} />}
+      </section>
+    </main>
+  );
+}
+
+function Access({ onDone }: { onDone: () => void }) {
+  const [setup, setSetup] = useState(false),
+    [setupAvailable, setSetupAvailable] = useState(false),
+    [form, setForm] = useState({
+      displayName: "Francesco",
+      username: "",
+      password: "",
+    }),
+    [error, setError] = useState("");
+  useEffect(() => {
+    api("GET", undefined, "setupStatus")
+      .then((d) => setSetupAvailable(Boolean(d.available)))
+      .catch(() => setSetupAvailable(false));
+  }, []);
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    try {
+      await api("POST", { action: setup ? "setup" : "login", ...form });
+      onDone();
+    } catch (x) {
+      setError((x as Error).message);
+    }
   }
-  async function flushPending(){timers.current.forEach(clearTimeout);timers.current.clear();await Promise.all([...new Set([...pending.current.keys(),...sending.current.keys()])].map(saveItem))}
-  async function leave(){try{setBusy(true);await flushPending();await reload();close()}finally{setBusy(false)}}
-  async function clearOrder(){if(!detail?.items.length||!window.confirm("Vuoi azzerare tutta la comanda?"))return;try{setBusy(true);await flushPending();await api("POST",{action:"clearOrder",orderId:table.order_id});await loadDetail();await reload()}catch(e){fail((e as Error).message)}finally{setBusy(false)}}
-  async function finish(){const receiptWindow=window.open("","_blank");try{setBusy(true);await flushPending();const result=await api("POST",{action:"closeOrder",orderId:table.order_id});close();await reload();if(receiptWindow)receiptWindow.location.href=`/ricevuta/${result.id}`;else window.open(`/ricevuta/${result.id}`,"_blank")}catch(e){receiptWindow?.close();fail((e as Error).message)}finally{setBusy(false)}}
-  async function cancel(){try{setBusy(true);await flushPending();await api("POST",{action:"cancelOrder",orderId:table.order_id});close();await reload()}catch(e){fail((e as Error).message)}finally{setBusy(false)}}
-  if(!detail)return <div className="panel empty">Caricamento comanda…</div>;
-  const categories=[...new Set(menu.map(m=>m.category))];
-  return <section className="order-page"><header className="order-page-head"><button className="back-button" disabled={busy} onClick={leave}>← Tavoli</button><div><small>COMANDA APERTA · {saving?"SALVATAGGIO…":"SALVATO"}</small><h2>{table.table_number==="Cassa"?"Ordine diretto":`Tavolo ${table.table_number}`} · {detail.order.account_name}</h2><p>{table.table_number==="Cassa"?"Operatore":"Cameriere"}: {detail.order.waiter_name} · {detail.order.guest_count} {detail.order.guest_count===1?"coperto":"coperti"}</p></div><div className="order-total"><small>TOTALE</small><strong>{money(detail.order.total)}</strong></div></header><div className="order-page-layout"><main className="order-catalog">{categories.map(category=><section key={category}><h3>{category}</h3><div>{menu.filter(m=>m.category===category).map(m=>{const q=detail.items.find(i=>i.menu_item_id===m.id)?.quantity||0;return <article className={q?"selected":""} key={m.id}><div><b>{m.name}</b><small>{money(m.price)}</small></div><div className="qty"><button aria-label={`Diminuisci ${m.name}`} disabled={busy||q===0} onClick={()=>quantity(m.id,q-1)}>−</button><strong>{q}</strong><button aria-label={`Aumenta ${m.name}`} disabled={busy} onClick={()=>quantity(m.id,q+1)}>＋</button></div>{q>0&&<button className="remove-item" disabled={busy} onClick={()=>quantity(m.id,0)}>Rimuovi</button>}</article>})}</div></section>)}</main><aside className="order-summary"><h3>Riepilogo</h3>{detail.items.map(i=>{const product=menu.find(m=>m.id===i.menu_item_id);return product?<div key={i.menu_item_id}><span>{i.quantity} × {product.name}</span><strong>{money(Number(product.price)*i.quantity)}</strong></div>:null})}{!detail.items.length&&<p>La comanda è ancora vuota.</p>}<button className="clear-order" disabled={busy||!detail.items.length} onClick={clearOrder}>Azzera comanda</button>{user.role!=="CAMERIERE"&&<div className="cash-actions"><button className="danger-button" disabled={busy} onClick={cancel}>{table.table_number==="Cassa"?"Annulla ordine":"Libera senza incasso"}</button><button className="checkout-button" disabled={busy||!detail.items.length} onClick={finish}>Incassa e stampa</button></div>}</aside></div></section>
+  return (
+    <main className="access">
+      <section>
+        <div className="login-brand">
+          <div className="logo">B</div>
+          <span>Area riservata</span>
+        </div>
+        <p className="overline">GESTIONALE SAGRA</p>
+        <h1>{setup ? "Crea il primo amministratore" : "Bentornato"}</h1>
+        <p>
+          {setup
+            ? "Configura l’account che gestirà personale, menu e serate."
+            : "Accedi per gestire il servizio Baccanalia."}
+        </p>
+        <form onSubmit={submit}>
+          {setup && (
+            <label>
+              Nome visualizzato
+              <input
+                value={form.displayName}
+                onChange={(e) =>
+                  setForm({ ...form, displayName: e.target.value })
+                }
+              />
+            </label>
+          )}
+          <label>
+            Nome utente
+            <input
+              autoComplete="username"
+              required
+              value={form.username}
+              onChange={(e) => setForm({ ...form, username: e.target.value })}
+            />
+          </label>
+          <label>
+            Password
+            <input
+              autoComplete={setup ? "new-password" : "current-password"}
+              required
+              minLength={8}
+              type="password"
+              value={form.password}
+              onChange={(e) => setForm({ ...form, password: e.target.value })}
+            />
+          </label>
+          {error && <div className="form-error">{error}</div>}
+          <button type="submit">{setup ? "Crea admin" : "Accedi"}</button>
+        </form>
+        {setup ? (
+          <button
+            className="link"
+            onClick={() => {
+              setSetup(false);
+              setError("");
+            }}
+          >
+            Torna al login
+          </button>
+        ) : (
+          setupAvailable && (
+            <button
+              className="link"
+              onClick={() => {
+                setSetup(true);
+                setError("");
+              }}
+            >
+              Prima configurazione
+            </button>
+          )
+        )}
+      </section>
+    </main>
+  );
 }
-function Menu({user,data,reload,fail}:{user:User;data:AppState|null;reload:()=>void;fail:(x:string)=>void}){
-  const categories:MenuCategory[]=data?.menuCategories||[],items:MenuItem[]=data?.menu||[];
-  const [category,setCategory]=useState<MenuCategory|null>(null),[categoryForm,setCategoryForm]=useState({name:"",displayOrder:"0",active:true}),[categoryOpen,setCategoryOpen]=useState(false);
-  const [item,setItem]=useState<MenuItem|null>(null),[itemOpen,setItemOpen]=useState(false),[form,setForm]=useState({name:"",categoryId:"",price:"",displayOrder:"0",active:true}),[saving,setSaving]=useState(false);
-  function editCategory(value?:MenuCategory){setCategory(value||null);setCategoryForm({name:value?.name||"",displayOrder:String(value?.display_order||0),active:value?.active??true});setCategoryOpen(true)}
-  function editItem(value?:MenuItem){setItem(value||null);setForm({name:value?.name||"",categoryId:value?.category_id||categories[0]?.id||"",price:value?String(value.price):"",displayOrder:String(value?.display_order||0),active:value?.active??true});setItemOpen(true)}
-  async function saveCategory(e:FormEvent){e.preventDefault();try{setSaving(true);fail("");await api("POST",{action:category?"updateMenuCategory":"addMenuCategory",categoryId:category?.id,...categoryForm,displayOrder:Number(categoryForm.displayOrder)});setCategoryOpen(false);await reload()}catch(e){fail((e as Error).message)}finally{setSaving(false)}}
-  async function saveItem(e:FormEvent){e.preventDefault();try{setSaving(true);fail("");await api("POST",{action:item?"updateMenuItem":"addMenuItem",itemId:item?.id,...form,price:Number(form.price)});setItemOpen(false);await reload()}catch(e){fail((e as Error).message)}finally{setSaving(false)}}
-  return <><div className="menu-toolbar"><p>{user.role==="ADMIN"?"Crea categorie e prodotti: gli aggiornamenti saranno visibili a tutto il personale.":"Menu aggiornato dalla direzione."}</p>{user.role==="ADMIN"&&<div><button className="secondary" onClick={()=>editCategory()}>＋ Categoria</button><button className="add-table" disabled={!categories.length} onClick={()=>editItem()}>＋ Prodotto</button></div>}</div><div className="menu-sections">{categories.map(c=><section className={`panel menu-section ${!c.active?"inactive":""}`} key={c.id}><div className="menu-heading"><h2>{c.name}{!c.active&&" · Disattivata"}</h2>{user.role==="ADMIN"&&<button onClick={()=>editCategory(c)}>Modifica categoria</button>}</div><div className="menu-items">{items.filter(i=>i.category_id===c.id).map(i=><article className={!i.active?"inactive":""} key={i.id}><div><b>{i.name}</b><small>{c.name}{!i.active?" · Disattivato":""}</small></div><strong>{money(i.price)}</strong>{user.role==="ADMIN"&&<button onClick={()=>editItem(i)}>Modifica</button>}</article>)}{!items.some(i=>i.category_id===c.id)&&<div className="empty">Nessun prodotto in questa categoria.</div>}</div></section>)}</div>{!categories.length&&<div className="panel empty">{user.role==="ADMIN"?"Crea la prima categoria per iniziare a comporre il menu.":"Il menu non è ancora disponibile."}</div>}{categoryOpen&&<div className="modal-bg"><form className="modal" onSubmit={saveCategory}><small>{category?"MODIFICA CATEGORIA":"NUOVA CATEGORIA"}</small><h2>{category?"Modifica categoria":"Aggiungi categoria"}</h2><label>Nome categoria<input autoFocus required value={categoryForm.name} onChange={e=>setCategoryForm({...categoryForm,name:e.target.value})} placeholder="Es. Panini"/></label><label>Ordine di visualizzazione<input type="number" min="0" value={categoryForm.displayOrder} onChange={e=>setCategoryForm({...categoryForm,displayOrder:e.target.value})}/></label>{category&&<label className="check"><input type="checkbox" checked={categoryForm.active} onChange={e=>setCategoryForm({...categoryForm,active:e.target.checked})}/> Categoria attiva</label>}<div><button type="button" className="secondary" onClick={()=>setCategoryOpen(false)}>Annulla</button><button disabled={saving||!categoryForm.name.trim()}>{saving?"Salvataggio…":"Salva"}</button></div></form></div>}{itemOpen&&<div className="modal-bg"><form className="modal" onSubmit={saveItem}><small>{item?"MODIFICA PRODOTTO":"NUOVO PRODOTTO"}</small><h2>{item?item.name:"Aggiungi prodotto"}</h2><label>Nome prodotto<input autoFocus required value={form.name} onChange={e=>setForm({...form,name:e.target.value})} placeholder="Es. Panino con salsiccia"/></label><label>Categoria<select required value={form.categoryId} onChange={e=>setForm({...form,categoryId:e.target.value})}>{categories.map(c=><option value={c.id} key={c.id}>{c.name}</option>)}</select></label><label>Prezzo<input required type="number" inputMode="decimal" min="0" step="0.01" value={form.price} onChange={e=>setForm({...form,price:e.target.value})} placeholder="0,00"/></label><label>Ordine di visualizzazione<input type="number" min="0" value={form.displayOrder} onChange={e=>setForm({...form,displayOrder:e.target.value})}/></label>{item&&<label className="check"><input type="checkbox" checked={form.active} onChange={e=>setForm({...form,active:e.target.checked})}/> Prodotto attivo</label>}<div><button type="button" className="secondary" onClick={()=>setItemOpen(false)}>Annulla</button><button disabled={saving||!form.name.trim()||!form.categoryId||form.price===""}>{saving?"Salvataggio…":"Salva"}</button></div></form></div>}</>
+
+function Tables({
+  user,
+  data,
+  reload,
+  fail,
+}: {
+  user: User;
+  data: AppState | null;
+  reload: () => void;
+  fail: (x: string) => void;
+}) {
+  const [chosen, setChosen] = useState<Table | null>(null),
+    [orderTable, setOrderTable] = useState<Table | null>(null),
+    [name, setName] = useState(""),
+    [guestCount, setGuestCount] = useState("1"),
+    [counterOpen, setCounterOpen] = useState(false),
+    [counterName, setCounterName] = useState(""),
+    [counterGuests, setCounterGuests] = useState("1"),
+    [editing, setEditing] = useState<Table | null>(null),
+    [manageOpen, setManageOpen] = useState(false),
+    [deleting, setDeleting] = useState<Table | null>(null),
+    [tableNumber, setTableNumber] = useState(""),
+    [saving, setSaving] = useState(false);
+  const tables: Table[] = data?.tables || [];
+  const sortedTables = [...tables].sort((a, b) =>
+    user.role === "CAMERIERE"
+      ? Number(b.assigned_waiter_id === user.id) -
+          Number(a.assigned_waiter_id === user.id) ||
+        Number(a.table_number) - Number(b.table_number)
+      : Number(a.table_number) - Number(b.table_number),
+  );
+  async function open() {
+    if (!chosen) return;
+    try {
+      setSaving(true);
+      fail("");
+      const result = await api("POST", {
+        action: "openTable",
+        tableId: chosen.id,
+        accountName: name,
+        guestCount: Number(guestCount),
+      });
+      setOrderTable({
+        ...chosen,
+        status: "OCCUPATO",
+        order_id: result.order.id,
+        account_name: name,
+        assigned_waiter_id: user.id,
+        waiter_name: user.displayName,
+        total: 0,
+        guest_count: Number(guestCount),
+      });
+      setChosen(null);
+      setName("");
+      setGuestCount("1");
+      await reload();
+    } catch (e) {
+      fail((e as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  }
+  function showTableForm(table?: Table) {
+    setEditing(table || null);
+    setTableNumber(table ? String(table.table_number) : "");
+    setManageOpen(true);
+  }
+  async function saveTable(e: FormEvent) {
+    e.preventDefault();
+    try {
+      setSaving(true);
+      fail("");
+      await api("POST", {
+        action: editing ? "updateTable" : "addTable",
+        tableId: editing?.id,
+        tableNumber: Number(tableNumber),
+      });
+      setManageOpen(false);
+      setEditing(null);
+      setTableNumber("");
+      await reload();
+    } catch (e) {
+      fail((e as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  }
+  async function deleteTable() {
+    if (!deleting) return;
+    try {
+      setSaving(true);
+      fail("");
+      await api("POST", { action: "deleteTable", tableId: deleting.id });
+      setDeleting(null);
+      await reload();
+    } catch (e) {
+      fail((e as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  }
+  async function openCounterOrder(e: FormEvent) {
+    e.preventDefault();
+    try {
+      setSaving(true);
+      fail("");
+      const result = await api("POST", {
+        action: "openCounterOrder",
+        accountName: counterName,
+        guestCount: Number(counterGuests),
+      });
+      setCounterOpen(false);
+      setOrderTable({
+        id: `direct-${result.order.id}`,
+        table_number: "Cassa",
+        status: "OCCUPATO",
+        order_id: result.order.id,
+        account_name: counterName,
+        assigned_waiter_id: user.id,
+        waiter_name: user.displayName,
+        total: 0,
+        guest_count: Number(counterGuests),
+      });
+      setCounterName("");
+      setCounterGuests("1");
+      await reload();
+    } catch (e) {
+      fail((e as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  }
+  if (orderTable)
+    return (
+      <OrderEditor
+        table={orderTable}
+        user={user}
+        menu={data?.menu.filter((i) => i.active) || []}
+        close={() => setOrderTable(null)}
+        reload={reload}
+        fail={fail}
+      />
+    );
+  return (
+    <>
+      <div className="tables-toolbar">
+        <div className="legend">
+          <span>● Disponibile</span>
+          <span>● Occupato</span>
+          <b>
+            {tables.filter((t) => t.status === "LIBERO").length}/{tables.length}{" "}
+            liberi
+          </b>
+        </div>
+        {user.role === "CASSIERE" && (
+          <button className="add-table" onClick={() => setCounterOpen(true)}>
+            ＋ Ordine diretto
+          </button>
+        )}
+        {user.role === "ADMIN" && (
+          <button className="add-table" onClick={() => showTableForm()}>
+            ＋ Aggiungi tavolo
+          </button>
+        )}
+      </div>
+      {Boolean(data?.directOrders.length) && (
+        <section className="direct-orders">
+          <div>
+            <small>ORDINI SENZA TAVOLO</small>
+            <h2>Ordini diretti da cassa</h2>
+          </div>
+          <div>
+            {data?.directOrders.map((o) => (
+              <button
+                key={o.order_id}
+                onClick={() =>
+                  setOrderTable({
+                    id: `direct-${o.order_id}`,
+                    table_number: "Cassa",
+                    status: "OCCUPATO",
+                    order_id: o.order_id,
+                    account_name: o.account_name,
+                    waiter_name: o.waiter_name,
+                    total: o.total,
+                  })
+                }
+              >
+                <span>Ordine diretto</span>
+                <b>{o.account_name}</b>
+                <strong>{money(o.total)}</strong>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
+      <div className="tables">
+        {sortedTables.map((t) => {
+          const own = t.assigned_waiter_id === user.id,
+            canCreate =
+              t.status === "LIBERO" &&
+              (user.role === "CAMERIERE" || user.role === "CASSIERE"),
+            canOpen =
+              t.status === "OCCUPATO" && (user.role !== "CAMERIERE" || own);
+          return (
+            <article
+              key={t.id}
+              className={`table-card ${t.status.toLowerCase()} ${own ? "own-table" : ""} ${canCreate || canOpen ? "clickable" : ""}`}
+              onClick={() =>
+                canCreate ? setChosen(t) : canOpen && setOrderTable(t)
+              }
+            >
+              {own && <mark>IL MIO TAVOLO</mark>}
+              <small>TAVOLO</small>
+              <strong>{String(t.table_number).padStart(2, "0")}</strong>
+              {t.status === "LIBERO" ? (
+                <>
+                  <b>Disponibile</b>
+                  <span>
+                    {canCreate ? "Tocca per aprire" : "Pronto per il servizio"}
+                  </span>
+                </>
+              ) : (
+                <>
+                  <b>{t.account_name}</b>
+                  <span>
+                    {t.waiter_name} · {money(t.total)}
+                  </span>
+                  <em>
+                    {canOpen
+                      ? "Apri la comanda"
+                      : "Assegnato a un altro cameriere"}
+                  </em>
+                </>
+              )}
+              {user.role === "ADMIN" && (
+                <div className="table-actions">
+                  <button
+                    disabled={t.status !== "LIBERO"}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      showTableForm(t);
+                    }}
+                  >
+                    Modifica
+                  </button>
+                  <button
+                    className="danger"
+                    disabled={t.status !== "LIBERO"}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setDeleting(t);
+                    }}
+                  >
+                    Elimina
+                  </button>
+                </div>
+              )}
+            </article>
+          );
+        })}
+      </div>
+      {!tables.length && (
+        <div className="empty">
+          {user.role === "ADMIN"
+            ? "Non ci sono ancora tavoli. Usa “Aggiungi tavolo” per iniziare."
+            : "L’admin deve ancora inserire i tavoli."}
+        </div>
+      )}
+      {counterOpen && (
+        <div className="modal-bg">
+          <form className="modal" onSubmit={openCounterOrder}>
+            <small>NUOVO ORDINE DIRETTO</small>
+            <h2>Ordine da cassa</h2>
+            <p>Questo ordine non sarà associato ad alcun tavolo.</p>
+            <label>
+              Nome del conto
+              <input
+                autoFocus
+                required
+                value={counterName}
+                onChange={(e) => setCounterName(e.target.value)}
+                placeholder="Es. Mario Rossi"
+              />
+            </label>
+            <label>
+              Numero di persone
+              <input
+                required
+                type="number"
+                inputMode="numeric"
+                min="1"
+                max="100"
+                step="1"
+                value={counterGuests}
+                onChange={(e) => setCounterGuests(e.target.value)}
+              />
+            </label>
+            <div>
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => setCounterOpen(false)}
+              >
+                Annulla
+              </button>
+              <button
+                disabled={
+                  saving || !counterName.trim() || Number(counterGuests) < 1
+                }
+              >
+                {saving ? "Apertura…" : "Apri ordine"}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+      {chosen && (
+        <div className="modal-bg">
+          <div className="modal">
+            <small>APERTURA CONTO</small>
+            <h2>Tavolo {chosen.table_number}</h2>
+            <label>
+              Nome del conto
+              <input
+                autoFocus
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Es. Famiglia Rossi"
+              />
+            </label>
+            <label>
+              Numero di persone
+              <input
+                required
+                type="number"
+                inputMode="numeric"
+                min="1"
+                max="100"
+                step="1"
+                value={guestCount}
+                onChange={(e) => setGuestCount(e.target.value)}
+              />
+            </label>
+            <div>
+              <button
+                className="secondary"
+                disabled={saving}
+                onClick={() => setChosen(null)}
+              >
+                Annulla
+              </button>
+              <button
+                disabled={saving || !name.trim() || Number(guestCount) < 1}
+                onClick={open}
+              >
+                {saving ? "Apertura…" : "Apri conto"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {manageOpen && (
+        <div className="modal-bg">
+          <form className="modal" onSubmit={saveTable}>
+            <small>{editing ? "MODIFICA TAVOLO" : "NUOVO TAVOLO"}</small>
+            <h2>
+              {editing ? `Tavolo ${editing.table_number}` : "Aggiungi tavolo"}
+            </h2>
+            <label>
+              Numero tavolo
+              <input
+                autoFocus
+                required
+                type="number"
+                inputMode="numeric"
+                min="1"
+                step="1"
+                value={tableNumber}
+                onChange={(e) => setTableNumber(e.target.value)}
+                placeholder="Es. 12"
+              />
+            </label>
+            <div>
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => setManageOpen(false)}
+              >
+                Annulla
+              </button>
+              <button disabled={saving || !tableNumber}>
+                {saving
+                  ? "Salvataggio…"
+                  : editing
+                    ? "Salva modifica"
+                    : "Aggiungi"}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+      {deleting && (
+        <div className="modal-bg">
+          <div className="modal confirm-modal">
+            <small>ELIMINA TAVOLO</small>
+            <h2>Eliminare il tavolo {deleting.table_number}?</h2>
+            <p>
+              Non sarà più visibile nella sala. Gli ordini passati resteranno
+              nello storico.
+            </p>
+            <div>
+              <button className="secondary" onClick={() => setDeleting(null)}>
+                Annulla
+              </button>
+              <button
+                className="danger-button"
+                disabled={saving}
+                onClick={deleteTable}
+              >
+                {saving ? "Eliminazione…" : "Elimina tavolo"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
 }
-function Orders(){const [rows,setRows]=useState<ClosedOrder[]>([]);useEffect(()=>{api("GET",undefined,"orders").then(d=>setRows(d.orders))},[]);return <div className="panel"><div className="panel-title"><div><h2>Ordini chiusi</h2><p>Il cassiere vede la serata attiva; l’admin vede tutto lo storico.</p></div><strong>{money(rows.reduce((s,o)=>s+(+o.total),0))}</strong></div>{rows.map(o=><div className="order-row" key={o.id}><span className="pill">CHIUSO</span><div><b>{o.table_number===null?"Ordine diretto":`Tavolo ${o.table_number}`} · {o.account_name}</b><small>{o.order_code} · {new Date(o.closed_at).toLocaleString("it-IT")}</small></div><span>{o.waiter_name}</span><strong>{money(o.total)}</strong><button className="receipt-link" onClick={()=>window.open(`/ricevuta/${o.id}`,"_blank")}>Ricevuta</button></div>)}{!rows.length&&<div className="empty">Nessun ordine chiuso.</div>}</div>}
-function Statistics(){
-  type StatRow={orders_count:number;revenue:number|string};
-  type Stats={summary:{orders_count:number;revenue:number|string;average_order:number|string;evenings_count:number;open_total:number|string};evenings:({work_date:string}&StatRow)[];products:{id:string;item_name:string;quantity:number;revenue:number|string;daily:{work_date:string;quantity:number;revenue:number|string}[]|null}[];tables:({id:string;table_number:number}&StatRow)[];waiters:({id:string;display_name:string}&StatRow)[]};
-  const [stats,setStats]=useState<Stats|null>(null),[error,setError]=useState("");
-  useEffect(()=>{api("GET",undefined,"stats").then(setStats).catch(e=>setError((e as Error).message))},[]);
-  if(error)return <div className="alert">{error}</div>;
-  if(!stats)return <div className="panel empty">Caricamento statistiche…</div>;
-  const maxRevenue=Math.max(...stats.evenings.map(e=>Number(e.revenue)),1);
-  return <><div className="stat-cards"><article><small>INCASSO TOTALE</small><strong>{money(stats.summary.revenue)}</strong><span>Su tutte le serate</span></article><article><small>ORDINI CHIUSI</small><strong>{stats.summary.orders_count}</strong><span>{stats.summary.evenings_count} serate registrate</span></article><article><small>SCONTRINO MEDIO</small><strong>{money(stats.summary.average_order)}</strong><span>Media per ordine</span></article><article><small>CONTI ANCORA APERTI</small><strong>{money(stats.summary.open_total)}</strong><span>Totale non ancora incassato</span></article></div><div className="stats-grid"><section className="panel"><div className="stats-title"><h2>Incasso per serata</h2><small>Andamento storico</small></div><div className="evening-stats">{stats.evenings.map(e=><article key={e.work_date}><div><b>{new Date(`${String(e.work_date).slice(0,10)}T12:00:00`).toLocaleDateString("it-IT",{day:"2-digit",month:"long",year:"numeric"})}</b><small>{e.orders_count} ordini</small></div><div className="stat-bar"><i style={{width:`${Number(e.revenue)/maxRevenue*100}%`}}/></div><strong>{money(e.revenue)}</strong></article>)}{!stats.evenings.length&&<div className="empty">Nessuna serata registrata.</div>}</div></section><StatList title="Incasso per cameriere" subtitle="Ordini chiusi assegnati" rows={stats.waiters.map(w=>({id:w.id,label:w.display_name,detail:`${w.orders_count} ordini`,value:w.revenue}))}/><StatList title="Incasso per tavolo" subtitle="Rendimento complessivo" rows={stats.tables.map(t=>({id:t.id,label:`Tavolo ${t.table_number}`,detail:`${t.orders_count} ordini`,value:t.revenue}))}/><section className="panel products-stat"><div className="stats-title"><h2>Statistiche prodotti</h2><small>Totali e dettaglio per serata</small></div><div className="product-stats-head"><span>Prodotto</span><span>Quantità</span><span>Incasso</span></div><div className="product-stats">{stats.products.map(i=><article key={i.id}><div><b>{i.item_name}</b><small>{i.daily?.map(d=>`${String(d.work_date).slice(0,10)}: ${d.quantity} pz`).join(" · ")||"Nessuna vendita"}</small></div><strong>{i.quantity}</strong><span>{money(i.revenue)}</span></article>)}{!stats.products.length&&<div className="empty">Nessun prodotto nel menu.</div>}</div></section></div></>
+function OrderEditor({
+  table,
+  user,
+  menu,
+  close,
+  reload,
+  fail,
+}: {
+  table: Table;
+  user: User;
+  menu: MenuItem[];
+  close: () => void;
+  reload: () => void;
+  fail: (x: string) => void;
+}) {
+  type Detail = {
+    order: {
+      id: number;
+      account_name: string;
+      waiter_name: string;
+      total: number | string;
+      guest_count: number;
+    };
+    items: { menu_item_id: string; quantity: number }[];
+  };
+  const [detail, setDetail] = useState<Detail | null>(null),
+    [busy, setBusy] = useState(false),
+    [saving, setSaving] = useState(false);
+  const pending = useRef(new Map<string, number>()),
+    timers = useRef(new Map<string, ReturnType<typeof setTimeout>>()),
+    sending = useRef(new Map<string, Promise<void>>());
+  const loadDetail = () =>
+    api("GET", undefined, `order&id=${table.order_id}`)
+      .then(setDetail)
+      .catch((e) => {
+        fail((e as Error).message);
+        close();
+      });
+  useEffect(() => {
+    api("GET", undefined, `order&id=${table.order_id}`)
+      .then(setDetail)
+      .catch((e) => {
+        fail((e as Error).message);
+        close();
+      });
+  }, [table.order_id, fail, close]);
+  async function saveItem(menuItemId: string) {
+    const active = sending.current.get(menuItemId);
+    if (active) return active;
+    const task = (async () => {
+      try {
+        while (pending.current.has(menuItemId)) {
+          const value = pending.current.get(menuItemId)!;
+          pending.current.delete(menuItemId);
+          await api("POST", {
+            action: "setItem",
+            orderId: table.order_id,
+            menuItemId,
+            quantity: value,
+          });
+        }
+      } catch (e) {
+        pending.current.delete(menuItemId);
+        fail((e as Error).message);
+        await loadDetail();
+        throw e;
+      } finally {
+        sending.current.delete(menuItemId);
+        if (!pending.current.size && !sending.current.size) setSaving(false);
+      }
+    })();
+    sending.current.set(menuItemId, task);
+    return task;
+  }
+  function quantity(menuItemId: string, value: number) {
+    const next = Math.max(0, value),
+      product = menu.find((m) => m.id === menuItemId);
+    if (!product) return;
+    setDetail((current) => {
+      if (!current) return current;
+      const previous =
+        current.items.find((i) => i.menu_item_id === menuItemId)?.quantity || 0;
+      const items =
+        next === 0
+          ? current.items.filter((i) => i.menu_item_id !== menuItemId)
+          : current.items.some((i) => i.menu_item_id === menuItemId)
+            ? current.items.map((i) =>
+                i.menu_item_id === menuItemId ? { ...i, quantity: next } : i,
+              )
+            : [...current.items, { menu_item_id: menuItemId, quantity: next }];
+      return {
+        ...current,
+        order: {
+          ...current.order,
+          total:
+            Number(current.order.total) +
+            (next - previous) * Number(product.price),
+        },
+        items,
+      };
+    });
+    pending.current.set(menuItemId, next);
+    setSaving(true);
+    const oldTimer = timers.current.get(menuItemId);
+    if (oldTimer) clearTimeout(oldTimer);
+    timers.current.set(
+      menuItemId,
+      setTimeout(() => {
+        timers.current.delete(menuItemId);
+        void saveItem(menuItemId).catch(() => {});
+      }, 350),
+    );
+  }
+  async function flushPending() {
+    timers.current.forEach(clearTimeout);
+    timers.current.clear();
+    await Promise.all(
+      [...new Set([...pending.current.keys(), ...sending.current.keys()])].map(
+        saveItem,
+      ),
+    );
+  }
+  async function leave() {
+    try {
+      setBusy(true);
+      await flushPending();
+      await reload();
+      close();
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function clearOrder() {
+    if (
+      !detail?.items.length ||
+      !window.confirm("Vuoi azzerare tutta la comanda?")
+    )
+      return;
+    try {
+      setBusy(true);
+      await flushPending();
+      await api("POST", { action: "clearOrder", orderId: table.order_id });
+      await loadDetail();
+      await reload();
+    } catch (e) {
+      fail((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function finish() {
+    const receiptWindow = window.open("", "_blank");
+    try {
+      setBusy(true);
+      await flushPending();
+      const result = await api("POST", {
+        action: "closeOrder",
+        orderId: table.order_id,
+      });
+      close();
+      await reload();
+      if (receiptWindow) receiptWindow.location.href = `/ricevuta/${result.id}`;
+      else window.open(`/ricevuta/${result.id}`, "_blank");
+    } catch (e) {
+      receiptWindow?.close();
+      fail((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function cancel() {
+    try {
+      setBusy(true);
+      await flushPending();
+      await api("POST", { action: "cancelOrder", orderId: table.order_id });
+      close();
+      await reload();
+    } catch (e) {
+      fail((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  if (!detail) return <div className="panel empty">Caricamento comanda…</div>;
+  const categories = [...new Set(menu.map((m) => m.category))];
+  return (
+    <section className="order-page">
+      <header className="order-page-head">
+        <button className="back-button" disabled={busy} onClick={leave}>
+          ← Tavoli
+        </button>
+        <div>
+          <small>COMANDA APERTA · {saving ? "SALVATAGGIO…" : "SALVATO"}</small>
+          <h2>
+            {table.table_number === "Cassa"
+              ? "Ordine diretto"
+              : `Tavolo ${table.table_number}`}{" "}
+            · {detail.order.account_name}
+          </h2>
+          <p>
+            {table.table_number === "Cassa" ? "Operatore" : "Cameriere"}:{" "}
+            {detail.order.waiter_name} · {detail.order.guest_count}{" "}
+            {detail.order.guest_count === 1 ? "coperto" : "coperti"}
+          </p>
+        </div>
+        <div className="order-total">
+          <small>TOTALE</small>
+          <strong>{money(detail.order.total)}</strong>
+        </div>
+      </header>
+      <div className="order-page-layout">
+        <main className="order-catalog">
+          {categories.map((category) => (
+            <section key={category}>
+              <h3>{category}</h3>
+              <div>
+                {menu
+                  .filter((m) => m.category === category)
+                  .map((m) => {
+                    const q =
+                      detail.items.find((i) => i.menu_item_id === m.id)
+                        ?.quantity || 0;
+                    return (
+                      <article className={q ? "selected" : ""} key={m.id}>
+                        <div>
+                          <b>{m.name}</b>
+                          <small>{money(m.price)}</small>
+                        </div>
+                        <div className="qty">
+                          <button
+                            aria-label={`Diminuisci ${m.name}`}
+                            disabled={busy || q === 0}
+                            onClick={() => quantity(m.id, q - 1)}
+                          >
+                            −
+                          </button>
+                          <strong>{q}</strong>
+                          <button
+                            aria-label={`Aumenta ${m.name}`}
+                            disabled={busy}
+                            onClick={() => quantity(m.id, q + 1)}
+                          >
+                            ＋
+                          </button>
+                        </div>
+                        {q > 0 && (
+                          <button
+                            className="remove-item"
+                            disabled={busy}
+                            onClick={() => quantity(m.id, 0)}
+                          >
+                            Rimuovi
+                          </button>
+                        )}
+                      </article>
+                    );
+                  })}
+              </div>
+            </section>
+          ))}
+        </main>
+        <aside className="order-summary">
+          <h3>Riepilogo</h3>
+          {detail.items.map((i) => {
+            const product = menu.find((m) => m.id === i.menu_item_id);
+            return product ? (
+              <div key={i.menu_item_id}>
+                <span>
+                  {i.quantity} × {product.name}
+                </span>
+                <strong>{money(Number(product.price) * i.quantity)}</strong>
+              </div>
+            ) : null;
+          })}
+          {!detail.items.length && <p>La comanda è ancora vuota.</p>}
+          <button
+            className="clear-order"
+            disabled={busy || !detail.items.length}
+            onClick={clearOrder}
+          >
+            Azzera comanda
+          </button>
+          {user.role !== "CAMERIERE" && (
+            <div className="cash-actions">
+              <button
+                className="danger-button"
+                disabled={busy}
+                onClick={cancel}
+              >
+                {table.table_number === "Cassa"
+                  ? "Annulla ordine"
+                  : "Libera senza incasso"}
+              </button>
+              <button
+                className="checkout-button"
+                disabled={busy || !detail.items.length}
+                onClick={finish}
+              >
+                Incassa e stampa
+              </button>
+            </div>
+          )}
+        </aside>
+      </div>
+    </section>
+  );
 }
-function StatList({title,subtitle,rows}:{title:string;subtitle:string;rows:{id:string;label:string;detail:string;value:number|string}[]}){return <section className="panel"><div className="stats-title"><h2>{title}</h2><small>{subtitle}</small></div><div className="revenue-list">{rows.map(r=><article key={r.id}><div><b>{r.label}</b><small>{r.detail}</small></div><strong>{money(r.value)}</strong></article>)}{!rows.length&&<div className="empty">Nessun dato disponibile.</div>}</div></section>}
-function Users({reload}:{reload:()=>void}){const [rows,setRows]=useState<StaffUser[]>([]),[form,setForm]=useState({displayName:"",username:"",password:"",role:"CAMERIERE"}),[msg,setMsg]=useState("");const load=()=>api("GET",undefined,"users").then(d=>setRows(d.users));useEffect(()=>{api("GET",undefined,"users").then(d=>setRows(d.users))},[]);async function create(e:FormEvent){e.preventDefault();try{await api("POST",{action:"createUser",...form});setMsg("Utente creato");setForm({displayName:"",username:"",password:"",role:"CAMERIERE"});load();reload()}catch(x){setMsg((x as Error).message)}}async function toggle(u:StaffUser){try{await api("POST",{action:"toggleUser",userId:u.id,active:!u.active});load()}catch(e){setMsg((e as Error).message)}}return <div className="split"><section className="panel"><h2>Personale</h2>{rows.map(u=><div className={`user-row ${!u.active?"inactive":""}`} key={u.id}><span>{u.display_name[0]}</span><div><b>{u.display_name}</b><small>@{u.username} · {u.active?"Attivo":"Disattivato"}</small></div><strong>{u.role}</strong>{u.role!=="ADMIN"&&<button className="secondary" onClick={()=>toggle(u)}>{u.active?"Disattiva":"Attiva"}</button>}</div>)}</section><form className="panel form" onSubmit={create}><h2>Nuovo utente</h2><label>Nome<input required value={form.displayName} onChange={e=>setForm({...form,displayName:e.target.value})}/></label><label>Username univoco<input required value={form.username} onChange={e=>setForm({...form,username:e.target.value})}/></label><label>Password<input required minLength={8} type="password" value={form.password} onChange={e=>setForm({...form,password:e.target.value})}/></label><label>Ruolo<select value={form.role} onChange={e=>setForm({...form,role:e.target.value})}><option>CAMERIERE</option><option>CASSIERE</option></select></label>{msg&&<p>{msg}</p>}<button>Crea account</button></form></div>}
-function Settings({reload}:{reload:()=>void}){const [data,setData]=useState<AppState|null>(null),[form,setForm]=useState({festivalName:"",cellarName:"",startDate:"2026-08-19",endDate:"2026-08-23"}),[msg,setMsg]=useState("");useEffect(()=>{api("GET",undefined,"state").then(d=>{setData(d);if(d.settings)setForm({festivalName:d.settings.festival_name,cellarName:d.settings.cellar_name,startDate:String(d.settings.start_date).slice(0,10),endDate:String(d.settings.end_date).slice(0,10)})})},[]);async function refresh(){const d=await api("GET",undefined,"state");setData(d);await reload()}async function save(e:FormEvent){e.preventDefault();try{await api("POST",{action:"saveSettings",...form});setMsg("Configurazione salvata");await refresh()}catch(e){setMsg((e as Error).message)}}async function activate(date:string){try{await api("POST",{action:"openEvening",workDate:date});await refresh()}catch(e){setMsg((e as Error).message)}}async function removeEvening(id:string,date:string){if(!window.confirm(`Eliminare definitivamente la serata del ${date}? Verranno cancellati anche tutti gli ordini, gli incassi e i prodotti collegati.`))return;try{const result=await api("POST",{action:"deleteEvening",eveningId:id});setMsg(`Serata eliminata. Ordini cancellati: ${result.deletedOrders}`);await refresh()}catch(e){setMsg((e as Error).message)}}return <div className="settings-grid"><form className="panel form" onSubmit={save}><h2>Manifestazione</h2><p>Questi dati compariranno sulle ricevute.</p><label>Nome della sagra<input required value={form.festivalName} onChange={e=>setForm({...form,festivalName:e.target.value})}/></label><label>Nome della cantina<input required value={form.cellarName} onChange={e=>setForm({...form,cellarName:e.target.value})}/></label><label>Data di inizio<input required type="date" value={form.startDate} onChange={e=>setForm({...form,startDate:e.target.value})}/></label><label>Data di fine<input required type="date" value={form.endDate} onChange={e=>setForm({...form,endDate:e.target.value})}/></label>{msg&&<p>{msg}</p>}<button>Salva configurazione</button></form><section className="panel"><h2>Serate lavorative</h2><p className="muted">Le date vengono create dal periodo della manifestazione. Attivane una alla volta.</p>{data?.workEvenings.map(w=>{const date=String(w.work_date).slice(0,10);return <div className="evening-row" key={w.id}><div><b>{new Date(`${date}T12:00:00`).toLocaleDateString("it-IT",{dateStyle:"long"})}</b><small>{w.active?"Serata attiva":"Non attiva"}</small></div><div className="evening-actions"><button disabled={w.active} onClick={()=>activate(date)}>{w.active?"Attiva":"Attiva serata"}</button><button className="delete-evening" onClick={()=>removeEvening(w.id,date)}>Elimina</button></div></div>})}</section></div>}
+function Menu({
+  user,
+  data,
+  reload,
+  fail,
+}: {
+  user: User;
+  data: AppState | null;
+  reload: () => void;
+  fail: (x: string) => void;
+}) {
+  const categories: MenuCategory[] = data?.menuCategories || [],
+    items: MenuItem[] = data?.menu || [];
+  const [category, setCategory] = useState<MenuCategory | null>(null),
+    [categoryForm, setCategoryForm] = useState({
+      name: "",
+      displayOrder: "0",
+      active: true,
+    }),
+    [categoryOpen, setCategoryOpen] = useState(false);
+  const [item, setItem] = useState<MenuItem | null>(null),
+    [itemOpen, setItemOpen] = useState(false),
+    [form, setForm] = useState({
+      name: "",
+      categoryId: "",
+      price: "",
+      displayOrder: "0",
+      active: true,
+    }),
+    [saving, setSaving] = useState(false);
+  function editCategory(value?: MenuCategory) {
+    setCategory(value || null);
+    setCategoryForm({
+      name: value?.name || "",
+      displayOrder: String(value?.display_order || 0),
+      active: value?.active ?? true,
+    });
+    setCategoryOpen(true);
+  }
+  function editItem(value?: MenuItem) {
+    setItem(value || null);
+    setForm({
+      name: value?.name || "",
+      categoryId: value?.category_id || categories[0]?.id || "",
+      price: value ? String(value.price) : "",
+      displayOrder: String(value?.display_order || 0),
+      active: value?.active ?? true,
+    });
+    setItemOpen(true);
+  }
+  async function saveCategory(e: FormEvent) {
+    e.preventDefault();
+    try {
+      setSaving(true);
+      fail("");
+      await api("POST", {
+        action: category ? "updateMenuCategory" : "addMenuCategory",
+        categoryId: category?.id,
+        ...categoryForm,
+        displayOrder: Number(categoryForm.displayOrder),
+      });
+      setCategoryOpen(false);
+      await reload();
+    } catch (e) {
+      fail((e as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  }
+  async function saveItem(e: FormEvent) {
+    e.preventDefault();
+    try {
+      setSaving(true);
+      fail("");
+      await api("POST", {
+        action: item ? "updateMenuItem" : "addMenuItem",
+        itemId: item?.id,
+        ...form,
+        price: Number(form.price),
+      });
+      setItemOpen(false);
+      await reload();
+    } catch (e) {
+      fail((e as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  }
+  return (
+    <>
+      <div className="menu-toolbar">
+        <p>
+          {user.role === "ADMIN"
+            ? "Crea categorie e prodotti: gli aggiornamenti saranno visibili a tutto il personale."
+            : "Menu aggiornato dalla direzione."}
+        </p>
+        {user.role === "ADMIN" && (
+          <div>
+            <button className="secondary" onClick={() => editCategory()}>
+              ＋ Categoria
+            </button>
+            <button
+              className="add-table"
+              disabled={!categories.length}
+              onClick={() => editItem()}
+            >
+              ＋ Prodotto
+            </button>
+          </div>
+        )}
+      </div>
+      <div className="menu-sections">
+        {categories.map((c) => (
+          <section
+            className={`panel menu-section ${!c.active ? "inactive" : ""}`}
+            key={c.id}
+          >
+            <div className="menu-heading">
+              <h2>
+                {c.name}
+                {!c.active && " · Disattivata"}
+              </h2>
+              {user.role === "ADMIN" && (
+                <button onClick={() => editCategory(c)}>
+                  Modifica categoria
+                </button>
+              )}
+            </div>
+            <div className="menu-items">
+              {items
+                .filter((i) => i.category_id === c.id)
+                .map((i) => (
+                  <article className={!i.active ? "inactive" : ""} key={i.id}>
+                    <div>
+                      <b>{i.name}</b>
+                      <small>
+                        {c.name}
+                        {!i.active ? " · Disattivato" : ""}
+                      </small>
+                    </div>
+                    <strong>{money(i.price)}</strong>
+                    {user.role === "ADMIN" && (
+                      <button onClick={() => editItem(i)}>Modifica</button>
+                    )}
+                  </article>
+                ))}
+              {!items.some((i) => i.category_id === c.id) && (
+                <div className="empty">
+                  Nessun prodotto in questa categoria.
+                </div>
+              )}
+            </div>
+          </section>
+        ))}
+      </div>
+      {!categories.length && (
+        <div className="panel empty">
+          {user.role === "ADMIN"
+            ? "Crea la prima categoria per iniziare a comporre il menu."
+            : "Il menu non è ancora disponibile."}
+        </div>
+      )}
+      {categoryOpen && (
+        <div className="modal-bg">
+          <form className="modal" onSubmit={saveCategory}>
+            <small>{category ? "MODIFICA CATEGORIA" : "NUOVA CATEGORIA"}</small>
+            <h2>{category ? "Modifica categoria" : "Aggiungi categoria"}</h2>
+            <label>
+              Nome categoria
+              <input
+                autoFocus
+                required
+                value={categoryForm.name}
+                onChange={(e) =>
+                  setCategoryForm({ ...categoryForm, name: e.target.value })
+                }
+                placeholder="Es. Panini"
+              />
+            </label>
+            <label>
+              Ordine di visualizzazione
+              <input
+                type="number"
+                min="0"
+                value={categoryForm.displayOrder}
+                onChange={(e) =>
+                  setCategoryForm({
+                    ...categoryForm,
+                    displayOrder: e.target.value,
+                  })
+                }
+              />
+            </label>
+            {category && (
+              <label className="check">
+                <input
+                  type="checkbox"
+                  checked={categoryForm.active}
+                  onChange={(e) =>
+                    setCategoryForm({
+                      ...categoryForm,
+                      active: e.target.checked,
+                    })
+                  }
+                />{" "}
+                Categoria attiva
+              </label>
+            )}
+            <div>
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => setCategoryOpen(false)}
+              >
+                Annulla
+              </button>
+              <button disabled={saving || !categoryForm.name.trim()}>
+                {saving ? "Salvataggio…" : "Salva"}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+      {itemOpen && (
+        <div className="modal-bg">
+          <form className="modal" onSubmit={saveItem}>
+            <small>{item ? "MODIFICA PRODOTTO" : "NUOVO PRODOTTO"}</small>
+            <h2>{item ? item.name : "Aggiungi prodotto"}</h2>
+            <label>
+              Nome prodotto
+              <input
+                autoFocus
+                required
+                value={form.name}
+                onChange={(e) => setForm({ ...form, name: e.target.value })}
+                placeholder="Es. Panino con salsiccia"
+              />
+            </label>
+            <label>
+              Categoria
+              <select
+                required
+                value={form.categoryId}
+                onChange={(e) =>
+                  setForm({ ...form, categoryId: e.target.value })
+                }
+              >
+                {categories.map((c) => (
+                  <option value={c.id} key={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Prezzo
+              <input
+                required
+                type="number"
+                inputMode="decimal"
+                min="0"
+                step="0.01"
+                value={form.price}
+                onChange={(e) => setForm({ ...form, price: e.target.value })}
+                placeholder="0,00"
+              />
+            </label>
+            <label>
+              Ordine di visualizzazione
+              <input
+                type="number"
+                min="0"
+                value={form.displayOrder}
+                onChange={(e) =>
+                  setForm({ ...form, displayOrder: e.target.value })
+                }
+              />
+            </label>
+            {item && (
+              <label className="check">
+                <input
+                  type="checkbox"
+                  checked={form.active}
+                  onChange={(e) =>
+                    setForm({ ...form, active: e.target.checked })
+                  }
+                />{" "}
+                Prodotto attivo
+              </label>
+            )}
+            <div>
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => setItemOpen(false)}
+              >
+                Annulla
+              </button>
+              <button
+                disabled={
+                  saving ||
+                  !form.name.trim() ||
+                  !form.categoryId ||
+                  form.price === ""
+                }
+              >
+                {saving ? "Salvataggio…" : "Salva"}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+    </>
+  );
+}
+function Orders() {
+  const [rows, setRows] = useState<ClosedOrder[]>([]);
+  useEffect(() => {
+    api("GET", undefined, "orders").then((d) => setRows(d.orders));
+  }, []);
+  return (
+    <div className="panel">
+      <div className="panel-title">
+        <div>
+          <h2>Ordini chiusi</h2>
+          <p>
+            Il cassiere vede la serata attiva; l’admin vede tutto lo storico.
+          </p>
+        </div>
+        <strong>{money(rows.reduce((s, o) => s + +o.total, 0))}</strong>
+      </div>
+      {rows.map((o) => (
+        <div className="order-row" key={o.id}>
+          <span className="pill">CHIUSO</span>
+          <div>
+            <b>
+              {o.table_number === null
+                ? "Ordine diretto"
+                : `Tavolo ${o.table_number}`}{" "}
+              · {o.account_name}
+            </b>
+            <small>
+              {o.order_code} · {new Date(o.closed_at).toLocaleString("it-IT")}
+            </small>
+          </div>
+          <span>{o.waiter_name}</span>
+          <strong>{money(o.total)}</strong>
+          <button
+            className="receipt-link"
+            onClick={() => window.open(`/ricevuta/${o.id}`, "_blank")}
+          >
+            Ricevuta
+          </button>
+        </div>
+      ))}
+      {!rows.length && <div className="empty">Nessun ordine chiuso.</div>}
+    </div>
+  );
+}
+function Statistics() {
+  type StatRow = { orders_count: number; revenue: number | string };
+  type Stats = {
+    settings?: {
+      festival_name: string;
+      cellar_name: string;
+      start_date: string;
+      end_date: string;
+    };
+    summary: {
+      orders_count: number;
+      revenue: number | string;
+      average_order: number | string;
+      evenings_count: number;
+      open_total: number | string;
+    };
+    evenings: ({ work_date: string } & StatRow)[];
+    products: {
+      id: string;
+      item_name: string;
+      quantity: number;
+      revenue: number | string;
+      daily:
+        | { work_date: string; quantity: number; revenue: number | string }[]
+        | null;
+    }[];
+    tables: ({ id: string; table_number: number } & StatRow)[];
+    waiters: ({ id: string; display_name: string } & StatRow)[];
+  };
+  const [stats, setStats] = useState<Stats | null>(null),
+    [error, setError] = useState(""),
+    [exporting, setExporting] = useState(false);
+  useEffect(() => {
+    api("GET", undefined, "stats")
+      .then(setStats)
+      .catch((e) => setError((e as Error).message));
+  }, []);
+  if (error) return <div className="alert">{error}</div>;
+  if (!stats)
+    return <div className="panel empty">Caricamento statistiche…</div>;
+  const currentStats = stats;
+  const maxRevenue = Math.max(
+    ...currentStats.evenings.map((e) => Number(e.revenue)),
+    1,
+  );
+  async function exportPdf() {
+    try {
+      setExporting(true);
+      const { jsPDF } = await import("jspdf");
+      const doc = new jsPDF({ unit: "mm", format: "a4" }),
+        left = 15,
+        right = 195;
+      let y = 18;
+      const date = (v: string) =>
+        new Date(`${String(v).slice(0, 10)}T12:00:00`).toLocaleDateString(
+          "it-IT",
+        );
+      const amount = (v: number | string) =>
+        `${Number(v).toLocaleString("it-IT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} EUR`;
+      const page = () => {
+        if (y <= 278) return;
+        doc.addPage();
+        y = 18;
+      };
+      const section = (title: string) => {
+        page();
+        doc.setFillColor(103, 23, 46);
+        doc.rect(left, y - 5, right - left, 8, "F");
+        doc.setTextColor(255, 255, 255);
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(11);
+        doc.text(title, left + 3, y);
+        doc.setTextColor(40, 29, 32);
+        y += 9;
+      };
+      const row = (label: string, value: string, detail?: string | string[]) => {
+        const lines = doc.splitTextToSize(label, 105) as string[];
+        const detailLines = detail
+          ? (Array.isArray(detail) ? detail : [detail]).flatMap(
+              (line) => doc.splitTextToSize(line, 145) as string[],
+            )
+          : [];
+        const h = Math.max(
+          7,
+          lines.length * 4.2 +
+            (detailLines.length ? 3 + detailLines.length * 3.4 : 0) +
+            2,
+        );
+        if (y + h > 282) {
+          doc.addPage();
+          y = 18;
+        }
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(9);
+        doc.text(lines, left, y);
+        doc.text(value, right, y, { align: "right" });
+        if (detailLines.length) {
+          doc.setFont("helvetica", "normal");
+          doc.setTextColor(110);
+          doc.setFontSize(7);
+          doc.text(detailLines, left + 2, y + 4);
+          doc.setTextColor(40, 29, 32);
+        }
+        y += h;
+        doc.setDrawColor(225);
+        doc.line(left, y - 2, right, y - 2);
+      };
+      doc.setTextColor(103, 23, 46);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(20);
+      doc.text(currentStats.settings?.festival_name || "Report evento", left, y);
+      y += 7;
+      doc.setTextColor(40, 29, 32);
+      doc.setFontSize(11);
+      doc.text(currentStats.settings?.cellar_name || "", left, y);
+      y += 6;
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      doc.text(
+        `Periodo: ${currentStats.settings ? `${date(currentStats.settings.start_date)} - ${date(currentStats.settings.end_date)}` : "non configurato"}`,
+        left,
+        y,
+      );
+      y += 10;
+      section("Riepilogo");
+      row("Incasso totale", amount(currentStats.summary.revenue));
+      row("Ordini chiusi", String(currentStats.summary.orders_count));
+      row("Scontrino medio", amount(currentStats.summary.average_order));
+      row("Conti ancora aperti", amount(currentStats.summary.open_total));
+      y += 5;
+      section("Incasso per serata");
+      currentStats.evenings.forEach((e) =>
+        row(date(e.work_date), amount(e.revenue), `${e.orders_count} ordini`),
+      );
+      y += 5;
+      section("Incasso per cameriere");
+      currentStats.waiters.forEach((w) =>
+        row(w.display_name, amount(w.revenue), `${w.orders_count} ordini`),
+      );
+      y += 5;
+      section("Incasso per tavolo");
+      currentStats.tables.forEach((t) =>
+        row(
+          `Tavolo ${t.table_number}`,
+          amount(t.revenue),
+          `${t.orders_count} ordini`,
+        ),
+      );
+      y += 5;
+      section("Statistiche prodotti");
+      currentStats.products.forEach((p) =>
+        row(
+          p.item_name,
+          amount(p.revenue),
+          [
+            `${p.quantity} pz totali`,
+            ...(p.daily?.length
+              ? p.daily.map(
+                  (d) =>
+                    `- ${date(d.work_date)}: ${d.quantity} pz (${amount(d.revenue)})`,
+                )
+              : ["- Nessuna vendita"]),
+          ],
+        ),
+      );
+      doc.addPage();
+      y = 18;
+      doc.setTextColor(103, 23, 46);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(16);
+      doc.text("Grafico quantità vendute per prodotto", left, y);
+      y += 7;
+      doc.setTextColor(90, 90, 90);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(8);
+      doc.text("Valori ordinati per numero di pezzi venduti", left, y);
+      y += 6;
+      const chartRows = [...currentStats.products]
+        .map((p) => ({ name: p.item_name, quantity: Number(p.quantity) || 0 }))
+        .sort((a, b) => b.quantity - a.quantity);
+      const maxChartRows = 20;
+      const visibleRows = chartRows.slice(0, maxChartRows);
+      const maxProductQuantity = Math.max(
+        ...visibleRows.map((r) => r.quantity),
+        1,
+      );
+      const barStart = 88;
+      const barMaxWidth = 78;
+      const trim = (text: string, max: number) =>
+        text.length > max ? `${text.slice(0, max - 1)}…` : text;
+      visibleRows.forEach((product, index) => {
+        const rowY = y + index * 12;
+        const width = Math.max(
+          1,
+          (product.quantity / maxProductQuantity) * barMaxWidth,
+        );
+        doc.setTextColor(40, 29, 32);
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(8);
+        doc.text(trim(product.name, 26), left, rowY + 3.5);
+        doc.setDrawColor(228, 228, 228);
+        doc.setFillColor(245, 245, 245);
+        doc.roundedRect(barStart, rowY, barMaxWidth, 5, 1.2, 1.2, "FD");
+        doc.setFillColor(103, 23, 46);
+        doc.roundedRect(barStart, rowY, width, 5, 1.2, 1.2, "F");
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(7);
+        doc.text(`${product.quantity} pz`, right, rowY + 3.5, { align: "right" });
+      });
+      if (chartRows.length > visibleRows.length) {
+        const hidden = chartRows.length - visibleRows.length;
+        doc.setTextColor(110, 110, 110);
+        doc.setFont("helvetica", "italic");
+        doc.setFontSize(7);
+        doc.text(
+          `+ ${hidden} prodotti non mostrati nel grafico per limiti di pagina`,
+          left,
+          y + visibleRows.length * 12 + 5,
+        );
+      }
+      const pages = doc.getNumberOfPages();
+      for (let i = 1; i <= pages; i++) {
+        doc.setPage(i);
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(7);
+        doc.setTextColor(120);
+        doc.text(
+          `Generato il ${new Date().toLocaleString("it-IT")} - Pagina ${i} di ${pages}`,
+          105,
+          291,
+          { align: "center" },
+        );
+      }
+      const filename = `statistiche-${String(currentStats.settings?.start_date || "evento").slice(0, 10)}-${String(currentStats.settings?.end_date || "").slice(0, 10)}.pdf`;
+      doc.save(filename);
+    } catch (e) {
+      setError((e as Error).message || "Impossibile generare il PDF");
+    } finally {
+      setExporting(false);
+    }
+  }
+  const period = stats.settings
+    ? `${new Date(`${String(stats.settings.start_date).slice(0, 10)}T12:00:00`).toLocaleDateString("it-IT")} – ${new Date(`${String(stats.settings.end_date).slice(0, 10)}T12:00:00`).toLocaleDateString("it-IT")}`
+    : "Periodo evento";
+  return (
+    <>
+      <div className="stats-toolbar">
+        <div>
+          <b>{stats.settings?.festival_name || "Statistiche evento"}</b>
+          <small>{period}</small>
+        </div>
+        <button disabled={exporting} onClick={exportPdf}>
+          <Download />
+          {exporting ? "Generazione…" : "Esporta PDF"}
+        </button>
+      </div>
+      <div className="stat-cards">
+        <article>
+          <small>INCASSO TOTALE</small>
+          <strong>{money(stats.summary.revenue)}</strong>
+          <span>Nel periodo dell’evento</span>
+        </article>
+        <article>
+          <small>ORDINI CHIUSI</small>
+          <strong>{stats.summary.orders_count}</strong>
+          <span>{stats.summary.evenings_count} serate registrate</span>
+        </article>
+        <article>
+          <small>SCONTRINO MEDIO</small>
+          <strong>{money(stats.summary.average_order)}</strong>
+          <span>Media per ordine</span>
+        </article>
+        <article>
+          <small>CONTI ANCORA APERTI</small>
+          <strong>{money(stats.summary.open_total)}</strong>
+          <span>Totale non ancora incassato</span>
+        </article>
+      </div>
+      <div className="stats-grid">
+        <section className="panel">
+          <div className="stats-title">
+            <h2>Incasso per serata</h2>
+            <small>Andamento nel periodo</small>
+          </div>
+          <div className="evening-stats">
+            {stats.evenings.map((e) => (
+              <article key={e.work_date}>
+                <div>
+                  <b>
+                    {new Date(
+                      `${String(e.work_date).slice(0, 10)}T12:00:00`,
+                    ).toLocaleDateString("it-IT", {
+                      day: "2-digit",
+                      month: "long",
+                      year: "numeric",
+                    })}
+                  </b>
+                  <small>{e.orders_count} ordini</small>
+                </div>
+                <div className="stat-bar">
+                  <i
+                    style={{
+                      width: `${(Number(e.revenue) / maxRevenue) * 100}%`,
+                    }}
+                  />
+                </div>
+                <strong>{money(e.revenue)}</strong>
+              </article>
+            ))}
+            {!stats.evenings.length && (
+              <div className="empty">Nessuna serata registrata.</div>
+            )}
+          </div>
+        </section>
+        <StatList
+          title="Incasso per cameriere"
+          subtitle="Ordini chiusi assegnati"
+          rows={stats.waiters.map((w) => ({
+            id: w.id,
+            label: w.display_name,
+            detail: `${w.orders_count} ordini`,
+            value: w.revenue,
+          }))}
+        />
+        <StatList
+          title="Incasso per tavolo"
+          subtitle="Rendimento complessivo"
+          rows={stats.tables.map((t) => ({
+            id: t.id,
+            label: `Tavolo ${t.table_number}`,
+            detail: `${t.orders_count} ordini`,
+            value: t.revenue,
+          }))}
+        />
+        <section className="panel products-stat">
+          <div className="stats-title">
+            <h2>Statistiche prodotti</h2>
+            <small>Totali e dettaglio per serata</small>
+          </div>
+          <div className="product-stats-head">
+            <span>Prodotto</span>
+            <span>Quantità</span>
+            <span>Incasso</span>
+          </div>
+          <div className="product-stats">
+            {stats.products.map((i) => (
+              <article key={i.id}>
+                <div>
+                  <b>{i.item_name}</b>
+                  <small>
+                    {i.daily
+                      ?.map(
+                        (d) =>
+                          `${String(d.work_date).slice(0, 10)}: ${d.quantity} pz`,
+                      )
+                      .join(" · ") || "Nessuna vendita"}
+                  </small>
+                </div>
+                <strong>{i.quantity}</strong>
+                <span>{money(i.revenue)}</span>
+              </article>
+            ))}
+            {!stats.products.length && (
+              <div className="empty">Nessun prodotto nel menu.</div>
+            )}
+          </div>
+        </section>
+      </div>
+    </>
+  );
+}
+function StatList({
+  title,
+  subtitle,
+  rows,
+}: {
+  title: string;
+  subtitle: string;
+  rows: { id: string; label: string; detail: string; value: number | string }[];
+}) {
+  return (
+    <section className="panel">
+      <div className="stats-title">
+        <h2>{title}</h2>
+        <small>{subtitle}</small>
+      </div>
+      <div className="revenue-list">
+        {rows.map((r) => (
+          <article key={r.id}>
+            <div>
+              <b>{r.label}</b>
+              <small>{r.detail}</small>
+            </div>
+            <strong>{money(r.value)}</strong>
+          </article>
+        ))}
+        {!rows.length && <div className="empty">Nessun dato disponibile.</div>}
+      </div>
+    </section>
+  );
+}
+function Users({ reload }: { reload: () => void }) {
+  const [rows, setRows] = useState<StaffUser[]>([]),
+    [form, setForm] = useState({
+      displayName: "",
+      username: "",
+      password: "",
+      role: "CAMERIERE",
+    }),
+    [msg, setMsg] = useState("");
+  const load = () =>
+    api("GET", undefined, "users").then((d) => setRows(d.users));
+  useEffect(() => {
+    api("GET", undefined, "users").then((d) => setRows(d.users));
+  }, []);
+  async function create(e: FormEvent) {
+    e.preventDefault();
+    try {
+      await api("POST", { action: "createUser", ...form });
+      setMsg("Utente creato");
+      setForm({
+        displayName: "",
+        username: "",
+        password: "",
+        role: "CAMERIERE",
+      });
+      load();
+      reload();
+    } catch (x) {
+      setMsg((x as Error).message);
+    }
+  }
+  async function toggle(u: StaffUser) {
+    try {
+      await api("POST", {
+        action: "toggleUser",
+        userId: u.id,
+        active: !u.active,
+      });
+      load();
+    } catch (e) {
+      setMsg((e as Error).message);
+    }
+  }
+  return (
+    <div className="split">
+      <section className="panel">
+        <h2>Personale</h2>
+        {rows.map((u) => (
+          <div className={`user-row ${!u.active ? "inactive" : ""}`} key={u.id}>
+            <span>{u.display_name[0]}</span>
+            <div>
+              <b>{u.display_name}</b>
+              <small>
+                @{u.username} · {u.active ? "Attivo" : "Disattivato"}
+              </small>
+            </div>
+            <strong>{u.role}</strong>
+            {u.role !== "ADMIN" && (
+              <button className="secondary" onClick={() => toggle(u)}>
+                {u.active ? "Disattiva" : "Attiva"}
+              </button>
+            )}
+          </div>
+        ))}
+      </section>
+      <form className="panel form" onSubmit={create}>
+        <h2>Nuovo utente</h2>
+        <label>
+          Nome
+          <input
+            required
+            value={form.displayName}
+            onChange={(e) => setForm({ ...form, displayName: e.target.value })}
+          />
+        </label>
+        <label>
+          Username univoco
+          <input
+            required
+            value={form.username}
+            onChange={(e) => setForm({ ...form, username: e.target.value })}
+          />
+        </label>
+        <label>
+          Password
+          <input
+            required
+            minLength={8}
+            type="password"
+            value={form.password}
+            onChange={(e) => setForm({ ...form, password: e.target.value })}
+          />
+        </label>
+        <label>
+          Ruolo
+          <select
+            value={form.role}
+            onChange={(e) => setForm({ ...form, role: e.target.value })}
+          >
+            <option>CAMERIERE</option>
+            <option>CASSIERE</option>
+          </select>
+        </label>
+        {msg && <p>{msg}</p>}
+        <button>Crea account</button>
+      </form>
+    </div>
+  );
+}
+function Settings({ reload }: { reload: () => void }) {
+  const [data, setData] = useState<AppState | null>(null),
+    [form, setForm] = useState({
+      festivalName: "",
+      cellarName: "",
+      startDate: "2026-08-19",
+      endDate: "2026-08-23",
+    }),
+    [msg, setMsg] = useState("");
+  useEffect(() => {
+    api("GET", undefined, "state").then((d) => {
+      setData(d);
+      if (d.settings)
+        setForm({
+          festivalName: d.settings.festival_name,
+          cellarName: d.settings.cellar_name,
+          startDate: String(d.settings.start_date).slice(0, 10),
+          endDate: String(d.settings.end_date).slice(0, 10),
+        });
+    });
+  }, []);
+  async function refresh() {
+    const d = await api("GET", undefined, "state");
+    setData(d);
+    await reload();
+  }
+  async function save(e: FormEvent) {
+    e.preventDefault();
+    try {
+      await api("POST", { action: "saveSettings", ...form });
+      setMsg("Configurazione salvata");
+      await refresh();
+    } catch (e) {
+      setMsg((e as Error).message);
+    }
+  }
+  async function activate(date: string) {
+    try {
+      await api("POST", { action: "openEvening", workDate: date });
+      await refresh();
+    } catch (e) {
+      setMsg((e as Error).message);
+    }
+  }
+  async function removeEvening(id: string, date: string) {
+    if (
+      !window.confirm(
+        `Eliminare definitivamente la serata del ${date}? Verranno cancellati anche tutti gli ordini, gli incassi e i prodotti collegati.`,
+      )
+    )
+      return;
+    try {
+      const result = await api("POST", {
+        action: "deleteEvening",
+        eveningId: id,
+      });
+      setMsg(`Serata eliminata. Ordini cancellati: ${result.deletedOrders}`);
+      await refresh();
+    } catch (e) {
+      setMsg((e as Error).message);
+    }
+  }
+  return (
+    <div className="settings-grid">
+      <form className="panel form" onSubmit={save}>
+        <h2>Manifestazione</h2>
+        <p>Questi dati compariranno sulle ricevute.</p>
+        <label>
+          Nome della sagra
+          <input
+            required
+            value={form.festivalName}
+            onChange={(e) => setForm({ ...form, festivalName: e.target.value })}
+          />
+        </label>
+        <label>
+          Nome della cantina
+          <input
+            required
+            value={form.cellarName}
+            onChange={(e) => setForm({ ...form, cellarName: e.target.value })}
+          />
+        </label>
+        <label>
+          Data di inizio
+          <input
+            required
+            type="date"
+            value={form.startDate}
+            onChange={(e) => setForm({ ...form, startDate: e.target.value })}
+          />
+        </label>
+        <label>
+          Data di fine
+          <input
+            required
+            type="date"
+            value={form.endDate}
+            onChange={(e) => setForm({ ...form, endDate: e.target.value })}
+          />
+        </label>
+        {msg && <p>{msg}</p>}
+        <button>Salva configurazione</button>
+      </form>
+      <section className="panel">
+        <h2>Serate lavorative</h2>
+        <p className="muted">
+          Le date vengono create dal periodo della manifestazione. Attivane una
+          alla volta.
+        </p>
+        {data?.workEvenings.map((w) => {
+          const date = String(w.work_date).slice(0, 10);
+          return (
+            <div className="evening-row" key={w.id}>
+              <div>
+                <b>
+                  {new Date(`${date}T12:00:00`).toLocaleDateString("it-IT", {
+                    dateStyle: "long",
+                  })}
+                </b>
+                <small>{w.active ? "Serata attiva" : "Non attiva"}</small>
+              </div>
+              <div className="evening-actions">
+                <button disabled={w.active} onClick={() => activate(date)}>
+                  {w.active ? "Attiva" : "Attiva serata"}
+                </button>
+                <button
+                  className="delete-evening"
+                  onClick={() => removeEvening(w.id, date)}
+                >
+                  Elimina
+                </button>
+              </div>
+            </div>
+          );
+        })}
+      </section>
+    </div>
+  );
+}
