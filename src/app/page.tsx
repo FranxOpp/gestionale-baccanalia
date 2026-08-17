@@ -29,12 +29,14 @@ type Table = {
   account_name?: string;
   total?: number;
   guest_count?: number;
+  service_type?: "TAVOLO" | "STAND";
 };
 type MenuCategory = {
   id: string;
   name: string;
   display_order: number;
   active: boolean;
+  menu_type: "TAVOLO" | "STAND";
 };
 type MenuItem = {
   id: string;
@@ -61,6 +63,7 @@ type AppState = {
     account_name: string;
     total: number;
     waiter_name: string;
+    service_type: "TAVOLO" | "STAND";
   }[];
 };
 type ClosedOrder = {
@@ -226,7 +229,7 @@ export default function Home() {
         {view === "menu" && (
           <Menu user={user} data={state} reload={load} fail={setError} />
         )}{" "}
-        {view === "ordini" && <Orders />}
+        {view === "ordini" && <Orders user={user} />}
         {view === "statistiche" && <Statistics />}
         {view === "utenti" && <Users reload={load} />}{" "}
         {view === "impostazioni" && <Settings reload={load} />}
@@ -352,6 +355,7 @@ function Tables({
     [guestCount, setGuestCount] = useState("1"),
     [counterOpen, setCounterOpen] = useState(false),
     [counterName, setCounterName] = useState(""),
+    [counterType, setCounterType] = useState<"TAVOLO" | null>(null),
     [counterGuests, setCounterGuests] = useState("1"),
     [editing, setEditing] = useState<Table | null>(null),
     [manageOpen, setManageOpen] = useState(false),
@@ -359,12 +363,14 @@ function Tables({
     [tableNumber, setTableNumber] = useState(""),
     [saving, setSaving] = useState(false);
   const tables: Table[] = data?.tables || [];
-  const sortedTables = [...tables].sort((a, b) =>
-    user.role === "CAMERIERE"
-      ? Number(b.assigned_waiter_id === user.id) -
-          Number(a.assigned_waiter_id === user.id) ||
-        Number(a.table_number) - Number(b.table_number)
-      : Number(a.table_number) - Number(b.table_number),
+  const sortedTables = [...tables].sort(
+    (a, b) =>
+      Number(b.status === "OCCUPATO") - Number(a.status === "OCCUPATO") ||
+      (user.role === "CAMERIERE"
+        ? Number(b.assigned_waiter_id === user.id) -
+          Number(a.assigned_waiter_id === user.id)
+        : 0) ||
+      Number(a.table_number) - Number(b.table_number),
   );
   async function open() {
     if (!chosen) return;
@@ -436,15 +442,16 @@ function Tables({
       setSaving(false);
     }
   }
-  async function openCounterOrder(e: FormEvent) {
-    e.preventDefault();
+  async function openCounterOrder(e?: FormEvent, serviceType: "TAVOLO" | "STAND" = "TAVOLO") {
+    e?.preventDefault();
     try {
       setSaving(true);
       fail("");
       const result = await api("POST", {
         action: "openCounterOrder",
-        accountName: counterName,
-        guestCount: Number(counterGuests),
+        accountName: serviceType === "STAND" ? "" : counterName,
+        guestCount: serviceType === "STAND" ? 1 : Number(counterGuests),
+        serviceType,
       });
       setCounterOpen(false);
       setOrderTable({
@@ -452,13 +459,15 @@ function Tables({
         table_number: "Cassa",
         status: "OCCUPATO",
         order_id: result.order.id,
-        account_name: counterName,
+        account_name: serviceType === "STAND" ? "Stand" : counterName,
+        service_type: serviceType,
         assigned_waiter_id: user.id,
         waiter_name: user.displayName,
         total: 0,
-        guest_count: Number(counterGuests),
+        guest_count: serviceType === "STAND" ? 1 : Number(counterGuests),
       });
       setCounterName("");
+      setCounterType(null);
       setCounterGuests("1");
       await reload();
     } catch (e) {
@@ -472,7 +481,14 @@ function Tables({
       <OrderEditor
         table={orderTable}
         user={user}
-        menu={data?.menu.filter((i) => i.active) || []}
+        menu={
+          data?.menu.filter(
+            (i) =>
+              i.active &&
+              data.menuCategories.find((c) => c.id === i.category_id)
+                ?.menu_type === (orderTable.service_type || "TAVOLO"),
+          ) || []
+        }
         close={() => setOrderTable(null)}
         reload={reload}
         fail={fail}
@@ -519,11 +535,12 @@ function Tables({
                     account_name: o.account_name,
                     waiter_name: o.waiter_name,
                     total: o.total,
+                    service_type: o.service_type,
                   })
                 }
               >
-                <span>Ordine diretto</span>
-                <b>{o.account_name}</b>
+                <span>{o.service_type === "STAND" ? "Stand" : "Tavolo"}</span>
+                <b>{o.service_type === "STAND" ? `Ordine #${o.order_id}` : o.account_name}</b>
                 <strong>{money(o.total)}</strong>
               </button>
             ))}
@@ -605,48 +622,59 @@ function Tables({
       )}
       {counterOpen && (
         <div className="modal-bg">
-          <form className="modal" onSubmit={openCounterOrder}>
+          <form className="modal" onSubmit={(e) => openCounterOrder(e)}>
             <small>NUOVO ORDINE DIRETTO</small>
             <h2>Ordine da cassa</h2>
-            <p>Questo ordine non sarà associato ad alcun tavolo.</p>
-            <label>
-              Nome del conto
-              <input
-                autoFocus
-                required
-                value={counterName}
-                onChange={(e) => setCounterName(e.target.value)}
-                placeholder="Es. Mario Rossi"
-              />
-            </label>
-            <label>
-              Numero di persone
-              <input
-                required
-                type="number"
-                inputMode="numeric"
-                min="1"
-                max="100"
-                step="1"
-                value={counterGuests}
-                onChange={(e) => setCounterGuests(e.target.value)}
-              />
-            </label>
+            {!counterType && (
+              <div className="direct-type-choice">
+                <button type="button" onClick={() => setCounterType("TAVOLO")}>Tavolo</button>
+                <button type="button" disabled={saving} onClick={() => openCounterOrder(undefined, "STAND")}>Stand</button>
+              </div>
+            )}
+            {counterType === "TAVOLO" && (
+              <>
+                <label>
+                  Nome del conto
+                  <input
+                    autoFocus
+                    required
+                    value={counterName}
+                    onChange={(e) => setCounterName(e.target.value)}
+                    placeholder="Es. Mario Rossi"
+                  />
+                </label>
+                <label>
+                  Numero di persone
+                  <input
+                    required
+                    type="number"
+                    inputMode="numeric"
+                    min="1"
+                    max="100"
+                    step="1"
+                    value={counterGuests}
+                    onChange={(e) => setCounterGuests(e.target.value)}
+                  />
+                </label>
+              </>
+            )}
             <div>
               <button
                 type="button"
                 className="secondary"
-                onClick={() => setCounterOpen(false)}
+                onClick={() => { setCounterOpen(false); setCounterType(null); }}
               >
                 Annulla
               </button>
-              <button
+              {counterType === "TAVOLO" && <button
                 disabled={
-                  saving || !counterName.trim() || Number(counterGuests) < 1
+                  saving ||
+                  !counterName.trim() ||
+                  Number(counterGuests) < 1
                 }
               >
                 {saving ? "Apertura…" : "Apri ordine"}
-              </button>
+              </button>}
             </div>
           </form>
         </div>
@@ -790,7 +818,8 @@ function OrderEditor({
   };
   const [detail, setDetail] = useState<Detail | null>(null),
     [busy, setBusy] = useState(false),
-    [saving, setSaving] = useState(false);
+    [saving, setSaving] = useState(false),
+    [checkoutOpen, setCheckoutOpen] = useState(false);
   const pending = useRef(new Map<string, number>()),
     timers = useRef(new Map<string, ReturnType<typeof setTimeout>>()),
     sending = useRef(new Map<string, Promise<void>>());
@@ -913,21 +942,29 @@ function OrderEditor({
       setBusy(false);
     }
   }
-  async function finish() {
-    const receiptWindow = window.open("", "_blank");
+  async function showCheckout() {
     try {
       setBusy(true);
       await flushPending();
-      const result = await api("POST", {
+      await loadDetail();
+      setCheckoutOpen(true);
+    } catch (e) {
+      fail((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function finish() {
+    try {
+      setBusy(true);
+      await flushPending();
+      await api("POST", {
         action: "closeOrder",
         orderId: table.order_id,
       });
       close();
       await reload();
-      if (receiptWindow) receiptWindow.location.href = `/ricevuta/${result.id}`;
-      else window.open(`/ricevuta/${result.id}`, "_blank");
     } catch (e) {
-      receiptWindow?.close();
       fail((e as Error).message);
     } finally {
       setBusy(false);
@@ -958,7 +995,7 @@ function OrderEditor({
           <small>COMANDA APERTA · {saving ? "SALVATAGGIO…" : "SALVATO"}</small>
           <h2>
             {table.table_number === "Cassa"
-              ? "Ordine diretto"
+              ? table.service_type === "STAND" ? "Stand" : "Tavolo"
               : `Tavolo ${table.table_number}`}{" "}
             · {detail.order.account_name}
           </h2>
@@ -1059,14 +1096,62 @@ function OrderEditor({
               <button
                 className="checkout-button"
                 disabled={busy || !detail.items.length}
-                onClick={finish}
+                onClick={showCheckout}
               >
-                Incassa e stampa
+                Incassa e chiudi
               </button>
             </div>
           )}
         </aside>
       </div>
+      {checkoutOpen && (
+        <div className="modal-bg checkout-modal-bg">
+          <div className="modal checkout-modal">
+            <small>RIEPILOGO INCASSO</small>
+            <h2>
+              {table.table_number === "Cassa"
+                ? table.service_type === "STAND"
+                  ? "Ordine stand"
+                  : "Ordine tavolo"
+                : `Tavolo ${table.table_number}`}
+            </h2>
+            <div className="checkout-summary">
+              <div>
+                <span>Totale conto</span>
+                <strong>{money(detail.order.total)}</strong>
+              </div>
+              <div>
+                <span>
+                  {detail.order.guest_count}{" "}
+                  {detail.order.guest_count === 1 ? "persona" : "persone"}
+                </span>
+                <strong>
+                  {money(
+                    Number(detail.order.total) / detail.order.guest_count,
+                  )}{" "}
+                  <small>a persona</small>
+                </strong>
+              </div>
+            </div>
+            <p>
+              Confermando, il conto verrà chiuso e il tavolo tornerà
+              disponibile.
+            </p>
+            <div>
+              <button
+                className="secondary"
+                disabled={busy}
+                onClick={() => setCheckoutOpen(false)}
+              >
+                Torna alla comanda
+              </button>
+              <button disabled={busy} onClick={finish}>
+                {busy ? "Chiusura…" : "Chiudi conto"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 }
@@ -1081,8 +1166,10 @@ function Menu({
   reload: () => void;
   fail: (x: string) => void;
 }) {
-  const categories: MenuCategory[] = data?.menuCategories || [],
+  const allCategories: MenuCategory[] = data?.menuCategories || [],
     items: MenuItem[] = data?.menu || [];
+  const [menuType, setMenuType] = useState<"TAVOLO" | "STAND">("TAVOLO");
+  const categories = allCategories.filter((c) => c.menu_type === menuType);
   const [category, setCategory] = useState<MenuCategory | null>(null),
     [categoryForm, setCategoryForm] = useState({
       name: "",
@@ -1128,6 +1215,7 @@ function Menu({
       await api("POST", {
         action: category ? "updateMenuCategory" : "addMenuCategory",
         categoryId: category?.id,
+        menuType,
         ...categoryForm,
         displayOrder: Number(categoryForm.displayOrder),
       });
@@ -1180,6 +1268,20 @@ function Menu({
             </button>
           </div>
         )}
+      </div>
+      <div className="menu-type-tabs" role="tablist" aria-label="Tipo di menu">
+        <button
+          className={menuType === "TAVOLO" ? "active" : ""}
+          onClick={() => setMenuType("TAVOLO")}
+        >
+          Menù tavoli
+        </button>
+        <button
+          className={menuType === "STAND" ? "active" : ""}
+          onClick={() => setMenuType("STAND")}
+        >
+          Menù stand
+        </button>
       </div>
       <div className="menu-sections">
         {categories.map((c) => (
@@ -1385,13 +1487,35 @@ function Menu({
     </>
   );
 }
-function Orders() {
-  const [rows, setRows] = useState<ClosedOrder[]>([]);
-  useEffect(() => {
+function Orders({ user }: { user: User }) {
+  const [rows, setRows] = useState<ClosedOrder[]>([]),
+    [deleting, setDeleting] = useState<ClosedOrder | null>(null),
+    [busy, setBusy] = useState(false),
+    [error, setError] = useState("");
+  const loadOrders = () =>
     api("GET", undefined, "orders").then((d) => setRows(d.orders));
+  useEffect(() => {
+    loadOrders().catch((e) => setError((e as Error).message));
   }, []);
+  async function deleteClosedOrder() {
+    if (!deleting) return;
+    try {
+      setBusy(true);
+      setError("");
+      await api("POST", {
+        action: "deleteClosedOrder",
+        orderId: deleting.id,
+      });
+      setDeleting(null);
+      await loadOrders();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
   return (
-    <div className="panel">
+    <div className="panel closed-orders-panel">
       <div className="panel-title">
         <div>
           <h2>Ordini chiusi</h2>
@@ -1401,6 +1525,7 @@ function Orders() {
         </div>
         <strong>{money(rows.reduce((s, o) => s + +o.total, 0))}</strong>
       </div>
+      {error && <div className="form-error">{error}</div>}
       {rows.map((o) => (
         <div className="order-row" key={o.id}>
           <span className="pill">CHIUSO</span>
@@ -1417,15 +1542,42 @@ function Orders() {
           </div>
           <span>{o.waiter_name}</span>
           <strong>{money(o.total)}</strong>
-          <button
-            className="receipt-link"
-            onClick={() => window.open(`/ricevuta/${o.id}`, "_blank")}
-          >
-            Ricevuta
-          </button>
+          {user.role === "ADMIN" && (
+            <button className="delete-order" onClick={() => setDeleting(o)}>
+              Elimina
+            </button>
+          )}
         </div>
       ))}
       {!rows.length && <div className="empty">Nessun ordine chiuso.</div>}
+      {deleting && (
+        <div className="modal-bg">
+          <div className="modal confirm-modal">
+            <small>ELIMINA ORDINE CHIUSO</small>
+            <h2>Eliminare {deleting.order_code}?</h2>
+            <p>
+              L’ordine e i relativi prodotti saranno rimossi definitivamente.
+              Totali e statistiche verranno ricalcolati automaticamente.
+            </p>
+            <div>
+              <button
+                className="secondary"
+                disabled={busy}
+                onClick={() => setDeleting(null)}
+              >
+                Annulla
+              </button>
+              <button
+                className="danger-button"
+                disabled={busy}
+                onClick={deleteClosedOrder}
+              >
+                {busy ? "Eliminazione…" : "Elimina ordine"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

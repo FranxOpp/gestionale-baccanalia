@@ -53,7 +53,7 @@ export async function GET(req: NextRequest) {
       const directOrders =
         user.role === "CAMERIERE"
           ? []
-          : await sql`select o.id order_id,o.account_name,o.total,u.display_name waiter_name from orders o join users u on u.id=o.waiter_id where o.table_id is null and o.status='APERTO' order by o.opened_at`;
+          : await sql`select o.id order_id,o.account_name,o.total,o.service_type,u.display_name waiter_name from orders o join users u on u.id=o.waiter_id where o.table_id is null and o.status='APERTO' order by o.opened_at`;
       return json({
         user,
         settings,
@@ -74,17 +74,6 @@ export async function GET(req: NextRequest) {
       const items =
         await sql`select * from order_items where order_id=${order.id} order by id`;
       return json({ order, items });
-    }
-    if (action === "receipt") {
-      await requireUser(["ADMIN", "CASSIERE"]);
-      const id = req.nextUrl.searchParams.get("id");
-      const [order] =
-        await sql`select o.*,t.table_number,u.display_name waiter_name,c.display_name cashier_name,w.work_date from orders o left join restaurant_tables t on t.id=o.table_id join users u on u.id=o.waiter_id left join users c on c.id=o.cashier_id join work_evenings w on w.id=o.work_evening_id where o.id=${id || 0} and o.status='CHIUSO'`;
-      if (!order) return json({ error: "Ricevuta non trovata" }, 404);
-      const items =
-        await sql`select item_name,unit_price,quantity,subtotal from order_items where order_id=${order.id} order by id`;
-      const [settings] = await sql`select * from app_settings limit 1`;
-      return json({ order, items, settings });
     }
     if (action === "orders") {
       if (user.role === "CAMERIERE")
@@ -232,11 +221,12 @@ export async function POST(req: NextRequest) {
       const name = String(b.name || "").trim();
       if (!name)
         return json({ error: "Inserisci il nome della categoria" }, 400);
+      const menuType = b.menuType === "STAND" ? "STAND" : "TAVOLO";
       const [duplicate] =
-        await sql`select id from menu_categories where lower(name)=lower(${name})`;
+        await sql`select id from menu_categories where lower(name)=lower(${name}) and menu_type=${menuType}`;
       if (duplicate) return json({ error: "Questa categoria esiste già" }, 409);
       const [category] =
-        await sql`insert into menu_categories(name,display_order) values(${name},coalesce((select max(display_order)+1 from menu_categories),1)) returning id,name,display_order`;
+        await sql`insert into menu_categories(name,menu_type,display_order) values(${name},${menuType},coalesce((select max(display_order)+1 from menu_categories where menu_type=${menuType}),1)) returning *`;
       return json({ category }, 201);
     }
     if (b.action === "updateMenuCategory") {
@@ -245,7 +235,7 @@ export async function POST(req: NextRequest) {
       if (!b.categoryId || !name)
         return json({ error: "Categoria non valida" }, 400);
       const [duplicate] =
-        await sql`select id from menu_categories where lower(name)=lower(${name}) and id<>${b.categoryId}`;
+        await sql`select id from menu_categories where lower(name)=lower(${name}) and menu_type=(select menu_type from menu_categories where id=${b.categoryId}) and id<>${b.categoryId}`;
       if (duplicate) return json({ error: "Questa categoria esiste già" }, 409);
       const displayOrder = Number(b.displayOrder);
       const [category] =
@@ -360,8 +350,9 @@ export async function POST(req: NextRequest) {
     }
     if (b.action === "openCounterOrder") {
       await requireUser(["CASSIERE"]);
-      const accountName = String(b.accountName || "").trim();
-      if (!accountName)
+      const serviceType = b.serviceType === "STAND" ? "STAND" : "TAVOLO";
+      const accountName = serviceType === "STAND" ? "Stand" : String(b.accountName || "").trim();
+      if (serviceType === "TAVOLO" && !accountName)
         return json({ error: "Inserisci il nome del conto" }, 400);
       const guestCount = Math.trunc(Number(b.guestCount));
       if (!Number.isInteger(guestCount) || guestCount < 1 || guestCount > 100)
@@ -370,7 +361,7 @@ export async function POST(req: NextRequest) {
         await sql`select id from work_evenings where active=true`;
       if (!evening) return json({ error: "Nessuna serata attiva" }, 409);
       const [order] =
-        await sql`insert into orders(table_id,work_evening_id,account_name,waiter_id,guest_count) values(null,${evening.id},${accountName},${user.id},${guestCount}) returning *`;
+        await sql`insert into orders(table_id,work_evening_id,account_name,waiter_id,guest_count,service_type) values(null,${evening.id},${accountName},${user.id},${guestCount},${serviceType}) returning *`;
       return json({ order }, 201);
     }
     if (b.action === "setItem") {
@@ -383,7 +374,7 @@ export async function POST(req: NextRequest) {
         if (!o || (user.role === "CAMERIERE" && o.waiter_id !== user.id))
           return null;
         const [m] =
-          await tx`select * from menu_items where id=${b.menuItemId} and active=true`;
+          await tx`select m.* from menu_items m join menu_categories c on c.id=m.category_id where m.id=${b.menuItemId} and m.active=true and c.active=true and c.menu_type=${o.service_type}`;
         if (!m) throw new Error("ITEM_NOT_FOUND");
         if (quantity === 0)
           await tx`delete from order_items where order_id=${o.id} and menu_item_id=${m.id}`;
@@ -434,6 +425,23 @@ export async function POST(req: NextRequest) {
       });
       if (!order)
         return json({ error: "Ordine già chiuso o non trovato" }, 409);
+      return json({ success: true });
+    }
+    if (b.action === "deleteClosedOrder") {
+      await requireUser(["ADMIN"]);
+      if (!b.orderId)
+        return json({ error: "Ordine non valido" }, 400);
+      const deleted = await sql.begin(async (tx) => {
+        const [order] =
+          await tx`select id from orders where id=${b.orderId} and status='CHIUSO' for update`;
+        if (!order) return false;
+        await tx`delete from order_events where order_id=${order.id}`;
+        await tx`delete from order_items where order_id=${order.id}`;
+        await tx`delete from orders where id=${order.id}`;
+        return true;
+      });
+      if (!deleted)
+        return json({ error: "Ordine chiuso non trovato" }, 404);
       return json({ success: true });
     }
     return json({ error: "Azione non valida" }, 400);

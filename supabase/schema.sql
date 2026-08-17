@@ -14,3 +14,15 @@ alter table orders alter column table_id drop not null;
 alter table orders add column if not exists guest_count integer not null default 1;
 alter table orders drop constraint if exists orders_guest_count_check;
 alter table orders add constraint orders_guest_count_check check (guest_count between 1 and 100);
+
+-- Menu distinti per servizio ai tavoli e stand. I dati esistenti restano nel menu Tavoli.
+alter table menu_categories add column if not exists menu_type text not null default 'TAVOLO';
+alter table menu_categories drop constraint if exists menu_categories_menu_type_check;
+alter table menu_categories drop constraint if exists menu_categories_name_key;
+alter table menu_categories add constraint menu_categories_menu_type_check check (menu_type in ('TAVOLO','STAND'));
+create unique index if not exists menu_categories_name_type_unique on menu_categories(lower(name),menu_type);
+
+-- Anche gli ordini diretti ricordano quale menu utilizzare.
+alter table orders add column if not exists service_type text not null default 'TAVOLO';
+alter table orders drop constraint if exists orders_service_type_check;
+alter table orders add constraint orders_service_type_check check (service_type in ('TAVOLO','STAND'));
