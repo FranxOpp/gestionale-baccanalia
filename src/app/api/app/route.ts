@@ -84,6 +84,19 @@ export async function GET(req: NextRequest) {
           : await sql`select o.*,t.table_number,u.display_name waiter_name,c.display_name cashier_name from orders o left join restaurant_tables t on t.id=o.table_id join users u on u.id=o.waiter_id left join users c on c.id=o.cashier_id where o.status='CHIUSO' order by o.closed_at desc`;
       return json({ orders });
     }
+    if (action === "closedOrderDetail") {
+      await requireUser(["ADMIN", "CASSIERE"]);
+      const id = req.nextUrl.searchParams.get("id");
+      const [order] =
+        user.role === "CASSIERE"
+          ? await sql`select o.*,t.table_number,u.display_name waiter_name,c.display_name cashier_name from orders o left join restaurant_tables t on t.id=o.table_id join users u on u.id=o.waiter_id left join users c on c.id=o.cashier_id join work_evenings w on w.id=o.work_evening_id where o.id=${id || 0} and o.status='CHIUSO' and w.active=true`
+          : await sql`select o.*,t.table_number,u.display_name waiter_name,c.display_name cashier_name from orders o left join restaurant_tables t on t.id=o.table_id join users u on u.id=o.waiter_id left join users c on c.id=o.cashier_id where o.id=${id || 0} and o.status='CHIUSO'`;
+      if (!order)
+        return json({ error: "Ordine chiuso non trovato" }, 404);
+      const items =
+        await sql`select item_name,unit_price,quantity,subtotal from order_items where order_id=${order.id} order by id`;
+      return json({ order, items });
+    }
     if (action === "stats") {
       await requireUser(["ADMIN"]);
       const [settings] = await sql`select festival_name,cellar_name,start_date,end_date from app_settings limit 1`;

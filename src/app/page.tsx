@@ -1488,8 +1488,22 @@ function Menu({
   );
 }
 function Orders({ user }: { user: User }) {
+  type ClosedOrderDetail = {
+    order: ClosedOrder & {
+      guest_count: number;
+      cashier_name?: string;
+      service_type?: "TAVOLO" | "STAND";
+    };
+    items: {
+      item_name: string;
+      unit_price: number | string;
+      quantity: number;
+      subtotal: number | string;
+    }[];
+  };
   const [rows, setRows] = useState<ClosedOrder[]>([]),
     [deleting, setDeleting] = useState<ClosedOrder | null>(null),
+    [detail, setDetail] = useState<ClosedOrderDetail | null>(null),
     [busy, setBusy] = useState(false),
     [error, setError] = useState("");
   const loadOrders = () =>
@@ -1508,6 +1522,19 @@ function Orders({ user }: { user: User }) {
       });
       setDeleting(null);
       await loadOrders();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function showDetail(order: ClosedOrder) {
+    try {
+      setBusy(true);
+      setError("");
+      setDetail(
+        await api("GET", undefined, `closedOrderDetail&id=${order.id}`),
+      );
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -1542,14 +1569,68 @@ function Orders({ user }: { user: User }) {
           </div>
           <span>{o.waiter_name}</span>
           <strong>{money(o.total)}</strong>
-          {user.role === "ADMIN" && (
-            <button className="delete-order" onClick={() => setDeleting(o)}>
-              Elimina
+          <div className="closed-order-actions">
+            <button disabled={busy} onClick={() => showDetail(o)}>
+              Dettagli
             </button>
-          )}
+            {user.role === "ADMIN" && (
+              <button className="delete-order" onClick={() => setDeleting(o)}>
+                Elimina
+              </button>
+            )}
+          </div>
         </div>
       ))}
       {!rows.length && <div className="empty">Nessun ordine chiuso.</div>}
+      {detail && (
+        <div className="modal-bg order-detail-bg">
+          <div className="modal order-detail-modal">
+            <small>ORDINE CHIUSO · {detail.order.order_code}</small>
+            <h2>
+              {detail.order.table_number !== null
+                ? `Tavolo ${detail.order.table_number}`
+                : detail.order.service_type === "STAND"
+                  ? "Ordine stand"
+                  : "Ordine tavolo"}{" "}
+              · {detail.order.account_name}
+            </h2>
+            <p className="order-detail-meta">
+              {new Date(detail.order.closed_at).toLocaleString("it-IT")} ·{` `}
+              {detail.order.guest_count}{" "}
+              {detail.order.guest_count === 1 ? "persona" : "persone"} ·{` `}
+              Operatore: {detail.order.waiter_name}
+            </p>
+            <div className="order-detail-items">
+              {detail.items.map((item, index) => (
+                <article key={index}>
+                  <div>
+                    <b>{item.quantity} × {item.item_name}</b>
+                    <small>{money(item.unit_price)} ciascuno</small>
+                  </div>
+                  <strong>{money(item.subtotal)}</strong>
+                </article>
+              ))}
+            </div>
+            <div className="order-detail-totals">
+              <div>
+                <span>Totale</span>
+                <strong>{money(detail.order.total)}</strong>
+              </div>
+              <div>
+                <span>A persona</span>
+                <strong>
+                  {money(
+                    Number(detail.order.total) / detail.order.guest_count,
+                  )}
+                </strong>
+              </div>
+            </div>
+            <div>
+              <button onClick={() => setDetail(null)}>Chiudi</button>
+            </div>
+          </div>
+        </div>
+      )}
       {deleting && (
         <div className="modal-bg">
           <div className="modal confirm-modal">
